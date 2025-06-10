@@ -7,8 +7,8 @@
 
 pp_markdown() {
   src=$1
-  dest=$(get_dest file $src:r.md -a)
-  success_or_log html2markdown --output $dest < $src &&
+  dest=$(_get_dest file $src:r.md -a)
+  _success_or_log ${=HTML2MARKDOWNcmd} --output $dest < $src || return
   echo $dest &&
   rm $src
 }
