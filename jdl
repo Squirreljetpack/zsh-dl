@@ -1,0 +1,552 @@
+#!/bin/zsh
+
+# https://github.com/sumoduduk/terminusdm
+
+### CONSTANTS
+
+: ${JDL_CONNECT_TIMEOUT:=5}
+: ${JDL_THREADS:=5}
+: ${JDL_PP_THREADS:=5}
+: ${VERBOSE:=false}
+
+: ${JDL_FORCE_PROTO}
+
+: ${JDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
+: ${JDL_CONFIG_DIR:=$HOME/.config/zsh-dl}
+
+PROTOCOLS=(HTTP SSH FILE)
+
+exportCmdVar() {
+  local var_name=$1
+  shift
+  for param; do
+    if (( $+commands[${param%% *}] )); then
+      typeset -gx "$var_name=$param"
+      return 0
+    fi
+  done
+  print -u2 "No option found for \$$var_name"
+  return 1
+}
+
+exportCmdVar "CLIPcmd" \
+  rscp \
+  "xclip -sel clip" \
+  "pbcopy"
+
+exportCmdVar "PASTEcmd" \
+  "rscp -o" \
+  "xclip -o" \
+  "pbpaste"
+
+setopt extended_glob
+
+### HANDLERS
+
+# entrypoint
+
+_handle_pretransform() {
+  proto=${1%%://*}
+  stem=${1#*://}
+  if [[ -n $JDL_FORCE_PROTO ]]; then
+    proto=$JDL_FORCE_PROTO
+  elif [[ $proto == $stem ]]; then
+    proto=
+  fi
+  echo $proto
+  echo $stem
+}
+
+handle() {
+  _handle_pretransform $1 | {
+    read -r proto
+    read -r stem
+  }
+
+  $VERBOSE && info proto
+
+  case $proto in
+    http(|s))
+      handle_http $stem
+      ;;
+    ssh)
+      handle_ssh $stem
+      ;;
+    sftp)
+      handle_ssh $stem
+      ;;
+    # ftp)
+    #   _form_array $FTP_HANDLERS
+    #   handle_ftp $stem
+    #   ;;
+    file)
+      _form_array $FILE_HANDLERS
+      handle_file $stem
+      ;;
+    *)
+      handle_na $1
+      return
+    ;;
+  esac
+}
+
+
+handle_http() {
+  url=$1
+  if [[ $url == *"?"* ]]; then
+    params=${url#*"?"}
+    url=${url%%"?"*}
+  fi
+  shift 1
+
+  info url
+  [[ -n $params ]] && info params
+
+
+  while IFS='=' read -r handler pattern; do
+    patterns=(${(s.:.)pattern})
+    if [[ $url == $~patterns[1] ]] && 
+    [[ (($#patterns < 2)) || $params == $~patterns[2] ]]; then
+      dest=$($handler $url $params) &&
+      submit_pp $handler $dest
+      break
+    fi
+  done <<< $HTTP_HANDLERS
+}
+
+handle_ssh() {
+  exec 3>&1 > /dev/null
+  
+  target=$1
+  subpath=${${1#*:}%.git}
+  userhost=${1%%:*}
+  shift 1
+
+  info target userhost subpath
+
+  while IFS='=' read -r handler pattern; do
+    patterns=(${(s.:.)pattern})
+    if [[ $target == $~patterns[1] ]] && 
+    [[ (($#patterns < 2)) || $userhost == $~patterns[2] ]] &&
+    [[ (($#patterns < 3)) || $subpath == $~patterns[3] ]]; then
+      dest=$($handler $userhost $subpath) &&
+      submit_pp $handler $dest
+      break
+    fi
+  done <<< $SSH_HANDLERS
+  
+  echo $dest >&3
+}
+
+handle_file() {
+  target=$1
+
+  if [[ ! -e $file && ! -L $file ]]; then
+     err "Nonexistant" $target
+     return 1
+  fi
+
+	type=$(get_file_type $target)
+  res="$(file -bI $target)"
+	mime=${res%%\; *}
+	encoding=${res#*\; }
+  shift 1
+
+  info target type mime encoding
+	
+  while IFS='=' read -r handler pattern; do
+	  patterns=(${(s.:.)pattern})
+    if [[ $target == $~patterns[1] ]] && 
+    [[ (($#patterns < 2)) || $type == $~patterns[2] ]] &&
+    [[ (($#patterns < 3)) || $mime == $~patterns[3] ]] &&
+    [[ (($#patterns < 4)) || $encoding == $~patterns[4] ]]; then
+      dest=$($handler $target $type $mime $encoding) &&
+      submit_pp $handler $dest
+      break
+    fi
+	done <<< $FILE_HANDLERS
+	
+	file.default $target $type $mime $encoding
+}
+
+handle_na() {
+  if [[ -e $1 ]]; then
+    handle_file $1
+  elif [[ $1 =~ '^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:.+$' ]]; then
+    handle_ssh $1
+  else
+    err Unhandled "'$1'"
+    return 1
+  fi
+}
+
+#### API
+
+## Handler Defaults
+http.default() {
+  target=$1
+  dest="$(get_dest http $target)"
+  [[ $target != http(|s)://* ]] && target="https://$target"
+  [[ -n $2 ]] && target+="?$2"
+  info target dest
+  shift 1
+  
+  case $dest in
+    *)
+      opts=()
+      if [[ -e $dest ]] && curl -I $target | grep -qi accept-ranges; then
+        opts+=(-C - -O) # continue at end, original filename
+      else
+        opts+=(-o $dest)
+      fi
+      
+      success_or_log curl -fL $opts $target
+      ;;
+  esac
+  
+  echo $dest
+}
+
+ssh.default() {
+  dest=$(get_dest ssh $1)
+  rsync -e "ssh -o ConnectTimeout=$JDL_CONNECT_TIMEOUT" -avucz $1 $dest || err RsyncError $1 # -u does an update in case we decided to keep the target
+}
+
+file.default() {
+  echo $1
+}
+
+## Getters
+
+get_dest() {
+  proto=$1
+  shift 1
+  case $proto in
+    http(|s))
+      dest=${${1%/\#[^\#/]##}:t} # strip #id
+      [[ -z $dest:e ]] && dest+=.html
+      mktarget -d ${@:2} $dest
+      ;;
+    ssh)
+      subpath=${${1##*:}%.git}
+      dest=$subpath:t
+      mktarget -d ${@:2} $dest
+      ;;
+    (|s)ftp)
+      dest=$1:t
+      mktarget -d ${@:2} $dest
+      ;;
+    file)
+      dest=$1:t
+      mktarget -d ${@:2} $dest
+      ;;
+    *)
+      return 1
+    ;;
+  esac
+}
+
+get_html_field() {
+  sed -n 's:.*<$field>\(.*\)</$field>.*:\1:p' $1 | tr -cd '[a-zA-Z0-9 -_[]()]'
+}
+
+get_file_type() {
+  # todo provide a string for fdsbcxesp file, directory, symlink, block-device, char-device, executable, empty, socket, pipe
+  echo f
+}
+
+## Utils
+
+err() {
+  # make error red
+  print -u2 -- "[ERROR: $1] $2"
+}
+
+warn() {
+  # make error red
+  print -u2 -- "[WARN: $1] $2"
+}
+
+info() {
+  # make info blue
+  while (($#)); do
+    print -u2 -- "[INFO: $1] ${(P)1}"
+    shift 1
+  done
+}
+
+inform() {
+  $VERBOSE && print -u2 -- "[INFO] $1"
+}
+
+#### POSTPROCESSORS
+
+# entrypoint
+begin_pp() {
+  tasks=()
+  while read -r line; do
+    (($#tasks >= $JDL_PP_THREADS)) && wait_any
+    file=${line#*$'\0'}
+    method=${line%$'\0'$file}
+
+    if [[ -z $method ]]; then
+      echo $file
+    elif [[ -n ${functions[pp_$method]} ]]; then
+      pp_$method $file
+    else
+      err InvalidPostprocessingMethod "$method for $file"
+      echo $file
+    fi &
+    tasks+=$!
+  done < $1
+}
+
+submit_pp() {
+  # Args: handler dest (created filename)
+  local method
+
+  method=${1#*.}
+  if [[ -n ${functions[pp_$method]} ]]; then
+
+    [[ $2 == *$'\0'* ]] &&
+    err InvalidName "Files cannot contain null characters ($2)" ||
+    [[ -n $2 ]] && echo $method$'\0'$2 >&$pp
+
+  elif  [[ $HANDLERS_MAP == *$'\n'$1=* ]]; then
+    method=${${HANDLERS_MAP##*$'\n'$1=}%%$'\n'*}
+
+    [[ $2 == *$'\0'* ]] &&
+    err InvalidName "Files cannot contain null characters ($2)" ||
+    [[ -n $2 ]] && echo $method$'\0'$2 >&$pp
+
+  else
+    echo $2
+  fi
+}
+
+
+
+### BEGIN LOGIC
+
+success_or_log() {
+  result=$($@)
+  if (($?)); then
+    :
+  fi
+  # need sqlite db
+  # todo: better logging (replace /dev/null)
+  # something like: target, dest, msg
+  # problem is capturing msg to stderr and processing - can use &> | tee /dev/fd/$myfd, just not sure if we want stdout of any of git clone/rsync/curl.
+  #... since we can submit target+dest and have the logger look for dest to replace with pp.
+}
+
+wait_any() {
+  while true; do
+    for (( i=1; i<=$#tasks; i++ )); do;
+      if ! kill -0 $tasks[i] 2>/dev/null; then
+        tasks[i]=()
+        return
+      fi
+    done
+    sleep 0.1
+  done
+}
+
+output() {
+  if [ -t 1 ]; then
+    tee >(${=CLIPcmd})
+  else
+    cat
+  fi
+}
+
+input() {
+  if (($#)); then
+    print -l -- $@
+  else
+    if [ -t 0 ]; then
+      ${=PASTEcmd}
+      echo
+    else
+      cat
+    fi
+  fi
+}
+
+### CONFIG
+
+_assert_config_exists() {
+  for f in $@; do
+    [[ -e $f ]] 
+  done
+}
+
+read_config() {
+  if [[ -z $CONFIG ]]; then
+    [[ -e $JDL_CONFIG_DIR/default.ini ]] &&
+    CONFIG=$JDL_CONFIG_DIR/default.ini ||
+    warn ConfigNotFound "No .ini config specified."
+  fi
+
+  files=($JDL_CONFIG_DIR/handlers.zsh $JDL_CONFIG_DIR/postprocessors.zsh)
+  for f in $files; do
+    [[ -e $f ]] && source $f || warn ConfigNotFound "$f not found, skipping."
+  done
+
+  HANDLERS_MAP=$'\n'
+
+  if [[ -e $CONFIG ]] && offenders=$(check_config); then
+    inform "Reading config from $CONFIG"
+
+    for proto in $PROTOCOLS; do
+      typeset -A _${proto}_HANDLERS
+    done
+
+    while IFS='=' read -r key val; do
+      [[ ${key%%\#*} == ([[:space:]]##|) ]] && continue
+      [[ -z $val ]] && warn EmptyKeyFound "$key" && continue
+      case $key in
+        JDL_CONNECT_TIMEOUT|JDL_THREADS|JDL_PP_THREADS|VERBOSE)
+          : ${(P)key:=$val}
+          ;;
+        http(|s).*)
+          method=${val##*\# : }
+          # postprocessor decoration found
+          if [[ $method != $val ]]; then
+            inform "Registered postprocessing method ($method) for $key"
+            HANDLERS_MAP+="$key=$method"$'\n'
+          fi
+          eval "val=$val"
+          _HTTP_HANDLERS[$key]=$val
+          ;;
+        ssh.*|sftp.*)
+          method=${val##*\# : }
+          # postprocessor decoration found
+          if [[ $method != $val ]]; then
+            inform "Registered postprocessing method ($method) for $key"
+            HANDLERS_MAP+="$key=$method"$'\n'
+          fi
+          eval "val=$val"
+          _SSH_HANDLERS[$key]=$val
+          ;;
+        file.*)
+          method=${val##*\# : }
+          # postprocessor decoration found
+          if [[ $method != $val ]]; then
+            inform "Registered postprocessing method ($method) for $key"
+            HANDLERS_MAP+="$key=$method"$'\n'
+          fi
+          eval "val=$val"
+          _FILE_HANDLERS[$key]=$val
+          ;;
+      esac
+    done < $CONFIG
+
+    for proto in $PROTOCOLS; do
+      protodict=_"$proto"_HANDLERS
+      export "$proto"_HANDLERS="$(for k v in "${(@Pkv)protodict}"; do echo "$k=$v"; done)"
+    done
+    export HANDLERS_MAP
+
+  else
+    err "InvalidConfig" "Errors found in $offenders[*]."
+    exit 1
+  fi
+}
+
+check_config() {
+  :
+}
+
+edit_config() {
+  local i file files
+  i=1
+
+  files=($JDL_CONFIG_DIR/*.ini(N) $JDL_CONFIG_DIR/handlers.zsh(N) $JDL_CONFIG_DIR/postprocessors.zsh(N))
+  for file in ${files[@]}; do
+    echo "$i) $file"
+    ((i++))
+  done
+  print -n "Enter a number to edit: "
+  read -r i
+  [[ -n $files[i] ]] || exit 1
+  ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $files[i]
+  check_config
+  exit $?
+}
+
+display_api() {
+  api=(http.default ssh.default file.default)
+  api+=(get_dest success_or_log)
+  for f in $api; do
+    which $f
+  done
+}
+
+### BEGIN
+
+usage() {
+    cat <<EOF
+Usage: dl [-hi] [...paths]
+
+Dead simple cli download abstractor
+
+Options:
+  -i:         Output info instead of downloading
+  -c [name]:  Use name.config in $JDL_CONFIG_DIR
+  -h:         Display this help message and exit
+
+Examples:
+  dl
+    Parses clipboard for urls to download
+  dl < urls.txt
+    Download from urls
+  dl "https://gutenberg.org/ebooks/76257" "https://github.com/sumoduduk/terminusdm/tree/main/src"
+    Downloads book #76257 as a markdown file, and the src/ folder of the sumoduduk/terminusdm in the main branch
+EOF
+
+  (($#)) && exit $1
+}
+
+EDIT=false
+  
+while getopts "hevc:" opt; do
+    case "$opt" in
+        c)
+            CONFIG=$JDL_CONFIG_DIR/$OPTARG.ini
+            ;;
+        e)
+            EDIT=true
+            ;;  
+        v)
+            VERBOSE=true
+            ;;
+        h)
+            usage 0
+            ;;
+        *)
+            usage 1
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+read_config $CONFIG
+$EDIT && edit_config $CONFIG
+
+# Begin
+
+PP=$(mktarget -arpv0 dl)
+begin_pp $PP | output &
+PP_ID=$!
+exec {pp}> $PP
+
+tasks=()
+input $@ | while read -r line && [[ -n $line ]]; do
+  (($#tasks >= $JDL_THREADS)) && wait_any
+  handle $line | output &
+  tasks+=$!
+done
+
+exec {pp}>&-
+wait $PP_ID
