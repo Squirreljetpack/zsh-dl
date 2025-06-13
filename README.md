@@ -2,9 +2,7 @@
 
 `zsh-dl` is a tool for downloading and post-processing files.
 
-The tool itself doesn't actually do any downloading or processing. Instead, it's a purely logical framework for defining whatever tree/case-type logic you may have for your input. But the process of defining handlers and invoking them becomes dead simple with it.
-
-
+The tool itself doesn't actually do any downloading or processing. Instead, it's a purely logical framework for defining whatever tree/case-type logic you may have for your input. But it makes defining handlers and invoking them simple and easy.
 
 ```zsh
 
@@ -69,23 +67,26 @@ The base functionality is pretty sparse. But for my own use case, there's only a
 - Reuse components across different protocols
 
 ```shell
-# The diagram goes input -> determine protocol -> determine handlers -> handler (You are here 🔻) -> postprocessor -> output (+ logging)
+# The diagram goes
+# Internal: [INPUT] -> [PROTOCOL HANDLER] -> [PROTOCOL-SPECIFIC HANDLER] ->
+# Modular : [HANDLER] (❤️ You are here) -> [POSTPROCESSOR] -> ... ->
+# -> [OUTPUT] (+ logging)
 
 
 # config/handlers.zsh
 file.fmt_ruff() {
   file=$1
-  [[ -e ~/ruff_$FORMAT_VARIANT.toml ]] && opts+=(--config ~/ruff_$FORMAT_VARIANT.toml) || opts=()
+  [[ -e ~/ruff_$FORMAT_VARIANT.toml ]] &&
+    opts+=(--config ~/ruff_$FORMAT_VARIANT.toml) ||
+    opts=()
   ruff format $opts $1
 }
 ```
-
 ```ini
 # config/fmt.ini
 file.fmt_ruff="*.py" # handle python files with fmt_ruff
 file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 ```
-
 ```shell
 # format all your files with strict settings
 
@@ -102,19 +103,18 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 ### 📊 Robust Logging & Statistics
 
 - SQLite database tracks history per config
-- Skip past executions*
-- Retry failed downloads*
+- Skip past executions
+- Retry failed downloads
 
 ```shell
 > dl -s
-+------+------------------------------------------+------------------------------------------+-----------------------------------+
-| St.  |                      Target              |                         Message          |              Destination          |
-+------+------------------------------------------+------------------------------------------+-----------------------------------+
-|  0   | github.com/nitefood/asn/blob/master/asn  |                                          |     …/network_net_select/asn.html |
-|  3   | man7.org/linux/man-pages/man2/read.2.ht… |                                          |        ~/SCRIPTS/zsh-dl/read.2.md |
-|  0   | [PP: markdown] invoked for /home/archr/… | [PP: markdown] invoked for /home/userna… |                                   |
-|  1   | invalid                                  | curl: (6) Could not resolve host: www.e… |        …/errors/invalid_host.html |
-+------+------------------------------------------+------------------------------------------+-----------------------------------+
+┌────┬────────────────┬──────────────────────────────────────────┬──────────────────────────────────────────┬──────────────────────────────┬──────┐
+│ ID │      Time      │                  Target                  │                 Message                  │         Destination          │ St.  │
+├────┼────────────────┼──────────────────────────────────────────┼──────────────────────────────────────────┼──────────────────────────────┼──────┤
+│ 3  │ 06-13 14:46:32 │ Do you know the Muffin man The Muffin m… │ [Unhandled]                              │                              │  -2  │
+│ 2  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │                                          │   ~/SCRIPTS/zsh-dl/search.md │  3   │
+│ 1  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │ [PP: markdown] invoked for /home/usern/… │ ~/SCRIPTS/zsh-dl/search.html │  0   │
+└────┴────────────────┴──────────────────────────────────────────┴──────────────────────────────────────────┴──────────────────────────────┴──────┘
 
 ```
 
@@ -156,37 +156,46 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-dl [OPTIONS] [URL_OR_PATH...]
+Usage: dl [-hlesv] [-c name] [--from log_id] […inputs/…log_ids]
 
-If no URL_OR_PATH is provided, zsh-dl will attempt to read from the clipboard.
+Dead simple cli extensible download tool.
 
-Examples
+Options:
+  -c <name>         : Sets name.ini in /home/archr/.config/zsh-dl as the config.
+  -e                : Edit configuration files.
+  -h                : Display this help message and exit.
+  -l […log_ids]     : Show the log for the current config.
+  --from [log_id=1] : Retry failed downloads from log_id.
+  -s                : Skip inputs which succeded in the past. ( ZSHDL_SKIP=true|false )
+  -v [level=2]      : Set the verbosity level. ( VERBOSE=[0-9] )
 
-(See example.zsh for more)
+Environment variables and configuration:
+  See dl -v -h
 
- 1 Download a book from Project Gutenberg as Markdown:
+Examples:
+  dl
+    Parses clipboard for urls to download
+  dl "https://gutenberg.org/ebooks/76257"
+    Download book #76257 as a markdown file
+  dl "https://github.com/sumoduduk/terminusdm/tree/main/src"
+    Download the src/ folder of the sumoduduk/terminusdm in the main branch to the current directory
+  dl "user@host:path/to/your/file.tx
+    Downloads over SSH
+  dl -ci "google.com"
+    Gets info about a URL/file
+  dl -cf "path/to/your/script.zsh" "random_weather.py"
+    Format local files using the fmt.ini config
+  dl -cm < urls.txt
+    Process a list of URLs in a file (media.ini):
 
-   dl "https://gutenberg.org/ebooks/76257"
-
- 2 Download a specific folder from a GitHub repository:
-
-   dl # From your clipboard containing https://github.com/Squirreljetpack/zsh-dl/tree/main/zsh-dl
-
- 3 Download a file over SSH:
-
-   dl "user@host:path/to/your/file.txt"
-
- 4 Get info about a URL/file:
-
-   dl -ci "google.com"
-
- 5 Format a local Zsh file using a config (fmt.ini):
-
-   dl -cf "path/to/your/script.zsh"
-
- 6 Process a list of URLs in a file (media.ini):
-
-   dl -cm < urls.txt
+Status codes:
+  -2: Unprocessed/Unhandled
+  -1: Handling
+   0: HandlerSuccess
+   1: HandlerError
+   2: PPError
+   3: PPSuccess
+   4: InternalErro
 ```
 
 # Configuration
@@ -194,7 +203,7 @@ Examples
 Configuration is read from `ZSHDL_CONFIG_DIR`, defaulting to `~/.config/zsh-dl`.
 
 ### Handlers and Preprocessors
-See `VERBOSE=3 dl --help`
+See `dl -v --help`
 
 ### Configs
 - Glob patterns:
@@ -236,13 +245,13 @@ See `VERBOSE=3 dl --help`
 ### Todo
 
 - Need to finish writing the usage
-- the logging schema needs a rework to better describe and track execution events and states, as well as to better handle workflows which do not involve files.
+- the logging schema needs a little work to better describe and track execution events and states, as well as to better handle workflows which do not involve files.
 - Create a screenshare
 
 \* Implement retries
 ### Improvements [^4] 
-- Improve logging schema (pwd, time)
 - Use a more powerful expression language than glob
+- Advanced mime detection
 - Lessfilter implementation
 - Generalized composition
 - Draw a diagram

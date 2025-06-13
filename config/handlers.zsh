@@ -6,7 +6,11 @@ http.info() {
   params=$2
 
   [[ -n $params ]] && params="?$params"
-  curl -sI "$url$params"
+  if have httpstat; then
+    httpstat "$url$params"
+  else
+    curl -sI "$url$params"
+  fi
 }
 
 # Example:
