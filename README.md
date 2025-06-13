@@ -1,19 +1,19 @@
 # zsh-dl: Dead Simple Downloader
 
-`zsh-dl` is a dead simple tool for downloading and post-processing files.
+`zsh-dl` is a tool for downloading and post-processing files.
 
-The tool itself doesn't actually do any downloading or processing[^1]. Instead, it's a purely logical framework for defining whatever tree/case-type logic you may have for your input.
-But it streamlines the process of defining handlers and invoking them.
+The tool itself doesn't actually do any downloading or processing. Instead, it's a purely logical framework for defining whatever tree/case-type logic you may have for your input. But the process of defining handlers and invoking them becomes dead simple with it.
+
 
 
 ```zsh
 
-dl "https://github.com/Squirreljetpack/zsh-dl/tree/main/config" # downloads the config folder of the branch into your current directory
-dl # Downloads the urls on your clipboard and converts them markdown
-dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/" # Downloads images or video into your current directory.
+dl "https://github.com/Squirreljetpack/zsh-dl/tree/main/config" # downloads the folder into your current directory
+dl # Downloads the urls on your clipboard and converts them to markdown
+dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/" # Downloads the images (or video) into your current directory.
 ```
 
-[^1]: So external dependencies such as html-to-markdown and yt-dlp are required for the following examples.
+[^1]: External dependencies are required.
 
 ## Key Features
 
@@ -25,7 +25,7 @@ dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
 
   - Project Gutenberg books (auto-convert to Markdown)
 
-  - Media downloads (images/videos)
+  - Media downloads (images/videos)[^1]
   
   - Multithreaded, chunked and resumable downloads
   
@@ -63,12 +63,15 @@ dl # read from your clipboard
 
 ### 🧩 Elegant Extension System
 
-The base functionality is pretty sparse. But for my own use case, there's only a few types of behavior I want depending what's on my clipboard, which zsh-dl makes easy to define and invoke[^4]:
+The base functionality is pretty sparse. But for my own use case, there's only a few types of behavior I want depending what's on my clipboard, which zsh-dl makes easy to define and invoke[^2]:
 
 - Define handlers directly in Zsh: no fussing about documentation and DSL's.
 - Reuse components across different protocols
 
 ```shell
+# The diagram goes input -> determine protocol -> determine handlers -> handler (You are here 🔻) -> postprocessor -> output (+ logging)
+
+
 # config/handlers.zsh
 file.fmt_ruff() {
   file=$1
@@ -84,15 +87,17 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 ```
 
 ```shell
-> dl --config fmt *
-# format all your files with default settings
-> FORMAT=strict dl -cf *
 # format all your files with strict settings
+
+> FORMAT=strict dl --config fmt *
+# or just:
+> dl -cf *
+# format all your files with default settings
 ```
 
-[^4]: ok yes it does feel kinda useless considering that its not much harder to just call curl or rsync. But the github download is useful imo, reduced cognitive load is always nice, and maybe the other parts might be of use to someone else. Also, have I mentioned its dead simple?
+[^2]: ok yes it does feel kinda useless considering that its not much harder to just call curl or rsync. But the github download is useful imo, reduced cognitive load is always nice, and maybe the other parts might be of use to someone else. Also, have I mentioned its dead simple?
 
-[See](#handlers-and-preprocessors) for the actual inputs provided and outputs expected for these handlers.
+See [Configuration](#handlers-and-preprocessors) for the actual inputs provided to and outputs expected of these handlers.
 
 ### 📊 Robust Logging & Statistics
 
@@ -100,13 +105,14 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 - Skip past executions*
 - Retry failed downloads*
 
-```
+```shell
+> dl -s
 +------+------------------------------------------+------------------------------------------+-----------------------------------+
 | St.  |                      Target              |                         Message          |              Destination          |
 +------+------------------------------------------+------------------------------------------+-----------------------------------+
 |  0   | github.com/nitefood/asn/blob/master/asn  |                                          |     …/network_net_select/asn.html |
 |  3   | man7.org/linux/man-pages/man2/read.2.ht… |                                          |        ~/SCRIPTS/zsh-dl/read.2.md |
-|  0   | [PP: markdown] invoked for /home/archr/… | [PP: markdown] invoked for /home/archr/… |                                   |
+|  0   | [PP: markdown] invoked for /home/archr/… | [PP: markdown] invoked for /home/userna… |                                   |
 |  1   | invalid                                  | curl: (6) Could not resolve host: www.e… |        …/errors/invalid_host.html |
 +------+------------------------------------------+------------------------------------------+-----------------------------------+
 
@@ -128,9 +134,8 @@ zsh-dl relies on the following external command-line tools. Certain functionalit
 
 - [peripet](https://github.com/Squirreljetpack/peripet): For determining download destination.
 - [sqlite3](https://www.sqlite.org/download.html): For logging.
-- clipboard commands (xclip/pbcopy[^2]): For reading from clipboard.
-
-[^2]: preinstalled in Mac
+- clipboard commands (xclip/pbcopy[^3]): For reading from clipboard.
+[^3]: preinstalled in Mac
 
 You surely already have these:
 - curl: For HTTP/HTTPS downloads.
@@ -139,7 +144,7 @@ You surely already have these:
 - tar: For extracting archives.
 - file: For determining file and MIME types.
 
-The predefined handlers/postprocessors are just wrappers around these:
+And the predefined handlers/postprocessors are just wrappers around these:
    - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
    - [gallery-dl](https://github.com/mikf/gallery-dl)
    - [html2markdown](https://github.com/JohannesKaufmann/html-to-markdown)
@@ -193,17 +198,30 @@ See `VERBOSE=3 dl --help`
 
 ### Configs
 - Glob patterns:
-  - Define a handler and optional postprocessor for an input pattern with `handler(:processor)="*" # comments are allowed`
+  - Define a handler and optional postprocessor for an input pattern like so:
+    - `handler(:processor)="*" # comments are allowed`
   - Handlers are matched sequentially in the order they are defined
   - Use `|` instead of `:` to continue onto other matching handlers
 </br>
 - Environment variables:
   - General:
-    - `ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR`
+      - `ZSHDL_CONNECT_TIMEOUT`
+      - `ZSHDL_THREADS`
+      - `ZSHDL_PP_THREADS`
+      - `VERBOSE`
+      - `ZSHDL_OUTPUT_DIR`
+      - `ZSHDL_LOG_DISPLAY_LIMIT`
+      - `ZSHDL_STATE_DIR`
+      - `ZSHDL_CONFIG_DIR`
   - Advanced:
-    - `ZSHDL_FORCE_PROTO`
+      - `ZSHDL_FORCE_PROTO`
   - Specific to the example methods (these are autodetected if not declared):
-    - `CLIPcmd PASTEcmd FORMATPYTHONcmd HTML2MARKDOWNcmd YTDLPcmd GALLERYDLcmd`
+      - `CLIPcmd`
+      - `PASTEcmd`
+      - `FORMATPYTHONcmd`
+      - `HTML2MARKDOWNcmd`
+      - `YTDLPcmd`
+      - `GALLERYDLcmd`
 
 </br>
 
@@ -222,11 +240,12 @@ See `VERBOSE=3 dl --help`
 - Create a screenshare
 
 \* Implement retries
-### Improvements [^3] 
-- Improve logging schema
+### Improvements [^4] 
+- Improve logging schema (pwd, time)
 - Use a more powerful expression language than glob
 - Lessfilter implementation
 - Generalized composition
+- Draw a diagram
 
 
-[^3]: which probably won't happen anytime soon
+[^4]: which probably won't happen anytime soon
