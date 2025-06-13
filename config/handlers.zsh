@@ -137,12 +137,12 @@ file.info() {
 }
 
 file.fmt_py() {
-  [[ -e ~/ruff_$FORMAT_VARIANT.toml ]] && opts+=(--config ~/ruff_$FORMAT_VARIANT.toml) || opts=()
+  [[ -e ~/ruff_$FORMAT.toml ]] && opts+=(--config ~/ruff_$FORMAT.toml) || opts=()
   ruff format $opts $1
 }
 
 file.fmt_biome() {
-  [[ -e ~/biome_$FORMAT_VARIANT.toml ]] && opts=(--config-path ~/biome_$FORMAT_VARIANT.toml) || opts=()
+  [[ -e ~/biome_$FORMAT.toml ]] && opts=(--config-path ~/biome_$FORMAT.toml) || opts=()
   biome format $opts $1
 }
 

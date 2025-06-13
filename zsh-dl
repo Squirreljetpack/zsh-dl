@@ -279,20 +279,20 @@ get_dest() {
     http(|s))
       dest=${${1%/\#[^\#/]##}:t} # strip #id
       [[ -z $dest:e ]] && dest+=.html
-      mktarget -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
       ;;
     ssh)
       subpath=${1%.git}
       dest=$subpath:t
-      mktarget -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
       ;;
     (|s)ftp)
       dest=$1:t
-      mktarget -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
       ;;
     file)
       dest=$1:t
-      mktarget -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
       ;;
     *)
       return 1
@@ -496,28 +496,25 @@ __show_log_entries() {
   local first_entry=true
 
   local log_id log_ls log_target log_msg log_dir log_time
-  for id in "$@"; do
-    if ! $first_entry; then
-      print
-    fi
-    first_entry=false
 
-    stty -icanon -ixon
+  base_select="SELECT id, strftime('%m-%d %H:%M:%S', time, 'localtime'), target, COALESCE(msg, ' '), COALESCE(dest, ' '), COALESCE(directory, ' '), LS FROM \"$ZSHDL_VARIANT\""
+  query=""
 
-    IFS=$'\t' read -r log_id log_time log_target log_msg log_dest log_dir log_ls < <(
-      sqlite3 -separator $'\t' "$ZSHDL_DB" \
-      "SELECT id, strftime('%m-%d %H:%M:%S', time, 'localtime'), target, COALESCE(msg, ' '), COALESCE(dest, ' '), COALESCE(directory, ' '), LS
-       FROM \"$ZSHDL_VARIANT\"
-       WHERE id = '$id'
-       LIMIT 1;"
-    )
+  if [[ "$1" =~ ^([0-9]+):$ ]]; then
+    query="SELECT * FROM ($base_select ORDER BY id DESC LIMIT ${1%:}) sub ORDER BY sub.id ASC;"
 
-    if [[ -z $log_id ]]; then
-      warn show_log_entries "Log entry with ID '$id' not found."
-      continue
-    fi
+  elif [[ "$1" == ":" ]]; then
+    query="$base_select ORDER BY id ASC;"
 
-    # --- Prepare Header ---
+  else
+    ids_list="${${(j.,.)@}%,}"
+    query="$base_select WHERE id IN ($ids_list);"
+  fi
+  first_entry=true
+  stty -icanon -ixon
+  sqlite3 -separator $'\t' "$ZSHDL_DB" "$query" |
+  while IFS=$'\t' read -r log_id log_time log_target log_msg log_dest log_dir log_ls; do
+    $first_entry && print && first_entry=false
     local header_pre="Task $log_id:   status code "
     local header_text="$header_pre$(_get_LS_color $log_ls)$log_ls$RESET_COLOR"
     local header_text_nocolor="$header_pre$log_ls"
@@ -753,6 +750,13 @@ __input() {
   fi | __lg_filter_skipped
 }
 
+__mkpipe() {
+  q="$(mktemp -u /tmp/$1.XXX)"
+  mkfifo $q >/dev/null || internal_err "Could not create pipe"
+  echo $q
+}
+
+
 __lg_get_since() {
   (($#>2)) || return
   local field=$1
@@ -914,10 +918,10 @@ __read_config() {
     fatal_err "Invalid config"
   }
 
-  typeset -U files
-  files=($ZSHDL_CONFIG_DIR/handlers.zsh $ZSHDL_CONFIG_DIR/postprocessors.zsh $ZSHDL_CONFIG_DIR/$ZSHDL_VARIANT_*.zsh(N))
+  typeset -Ug ZSHDL_CONFIG_FILES
+  ZSHDL_CONFIG_FILES=($ZSHDL_CONFIG_DIR/handlers.zsh $ZSHDL_CONFIG_DIR/postprocessors.zsh $ZSHDL_CONFIG_DIR/$ZSHDL_VARIANT_*.zsh(N))
   
-  for f in $files; do
+  for f in $ZSHDL_CONFIG_FILES; do
     [[ -f $f ]] && source $f || warn ConfigNotFound "$f not found, skipping."
   done
 
@@ -981,16 +985,19 @@ __check_config() {
 
 __edit_config() {
   local i file files
-  i=1
+  i=3
 
-  files=("Clear Database" $ZSHDL_CONFIG_DIR/*.ini(N) $ZSHDL_CONFIG_DIR/*.zsh(N))
-  for file in ${files[@]}; do
+  echo "Editing files for the $ZSHDL_VARIANT config:"
+
+  echo "1) Clear Database"
+  echo "2) $CONFIG"
+  for file in ${ZSHDL_CONFIG_FILES[@]}; do
     echo "$i) $file"
     ((i++))
   done
   print -n "Enter a number to edit: "
   read -r i
-  [[ -n $files[i] ]] || exit 1
+  [[ -n $files[i] ]] || fatal_err InvalidSelection
 
   if [[ $files[i] == "Clear Database" ]]; then
     rm $ZSHDL_DB || internal_err "Could not delete database"
@@ -1079,9 +1086,21 @@ exportCmdVar "YTDLPcmd" \
 exportCmdVar "GALLERYDLcmd" \
   "gallery-dl"
 
+if ! have pere; then
+  pere() {
+    local file=${@[$#]}
+    while  [[ -z $file || -e $file ]]; do
+      print -n -u2 "$file exists! Please choose a different name: "
+      read -r file </dev/tty
+    done
+    
+    echo $file
+  }
+fi
+
 unset -f exportCmdVar
 
-CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_SYNC)
+CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP)
 
 : ${ZSHDL_CONNECT_TIMEOUT:=5}
 : ${ZSHDL_THREADS:=5}
@@ -1099,19 +1118,23 @@ ZSHDL_DB=$ZSHDL_STATE_DIR/log.db
 ### ARGPARSE
 
 usage() {
-    cat <<EOF
+  ((VERBOSE>1)) && __display_api
+
+  cat <<EOF
 Usage: $PROG [-hlesv] [-c name] [-r count] […inputs/…log_ids]
 
-Dead simple cli extensible download tool.
+Extensible cli download tool.
 
 Options:
   -c <name>         : Use name.ini in $ZSHDL_CONFIG_DIR as the config.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
-  -l […log_ids]     : Show the log.
+  -l                : Show the log.
+                        Providing a list of …log_ids or [n]: for the last n logs will display full execution details.
   --from [log_id=0] : Retry failed downloads.
   -s                : Skip inputs which succeded in the past. ( ZSHDL_SKIP=true|false )
-  -v [level=2]      : Set the verbosity level. ( VERBOSE=[0-9] )
+  -v                : Set verbosity 2
+  --verbose [level] : Set verbosity level
 
 Environment variables and configuration:
   See $PROG -v -h
@@ -1147,6 +1170,7 @@ EOF
 
 EDIT=false
 SHOWLOG=false
+SHOWHELP=false
 RETRY_FROM=0
 RETRY=1
 SCRIPT="$(readlink -f -- "$0")"
@@ -1158,7 +1182,7 @@ _posargs=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --help)
-      usage 0
+      SHOWHELP=true
       ;;
     --from)
       if ! $_posargs; then
@@ -1167,6 +1191,18 @@ while [[ $# -gt 0 ]]; do
           shift
         else
           RETRY_FROM=1
+        fi
+        shift
+        continue
+      fi
+      ;|
+    --verbose)
+      if ! $_posargs; then
+        if [[ "$2" =~ ^[0-9]$ ]]; then
+          VERBOSE=$2
+          shift
+        else
+          VERBOSE=2
         fi
         shift
         continue
@@ -1183,7 +1219,7 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${new_args[@]}"
 
-while getopts "hlev:c:r:s" opt; do
+while getopts "hlevc:r:s" opt; do
     case "$opt" in
         c)
             CONFIG=($ZSHDL_CONFIG_DIR/$OPTARG*.ini)
@@ -1195,17 +1231,10 @@ while getopts "hlev:c:r:s" opt; do
             ZSHDL_SKIP=true
             ;;
         v)
-            # not perfect if last arg but good enough
-            if [[ $OPTARG != [0-9] ]]; then
-              VERBOSE=2
-              ((OPTIND--))
-            else
-              VERBOSE=$OPTARG
-            fi
+            VERBOSE=2
             ;;
         h)
-            ((VERBOSE>1)) && __display_api
-            usage 0
+            SHOWHELP=true
             ;;
         l)
             SHOWLOG=true
@@ -1215,6 +1244,8 @@ while getopts "hlev:c:r:s" opt; do
             ;;
     esac
 done
+
+$SHOWHELP && usage 0
 shift $((OPTIND - 1))
 
 
@@ -1233,15 +1264,18 @@ fi
 $EDIT && __edit_config $CONFIG
 
 # Begin
-LG=$(mktarget -arpv0 dl_lg)
+LG=$(__mkpipe dl_lg)
 __begin_lg $LG &
 LG_ID=$!
 exec {lg}> $LG
 
-PP=$(mktarget -arpv0 dl_pp)
+
+PP=$(__mkpipe dl_pp)
 __begin_pp $PP | __output &
 PP_ID=$!
 exec {pp}> $PP
+
+trap "rm $PP $LG" EXIT 
 
 tasks=()
 __input $@ | while read -r line; do
@@ -1252,7 +1286,6 @@ done
 
 exec {pp}>&-
 exec {lg}>&-
-rm $LG $PP
 
 
 wait $PP_ID
