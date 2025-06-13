@@ -760,11 +760,13 @@ _log_msg() {
 }
 
 _log_dest() {
+  local dest
   if [[ $1 == '# '* ]]; then
     local entry=${1#'# '}
     if [[ -e $entry ]]; then
-      print -u2 -- "[Skipped] $entry"
-      print -r -- 5$'\0'$LINE$'\0'$'\0'$entry >&$lg
+      dest=${entry/#$HOME/~}
+      print -u2 -- "[Skipped] $dest"
+      print -r -- 5$'\0'$LINE$'\0'$'\0'$dest >&$lg
     else
       err Nonexistant $entry
     fi
@@ -772,12 +774,13 @@ _log_dest() {
   fi
 
   if [[ -e $1 ]]; then
+    dest=${entry/#$HOME/~}
     if [[ -z $LS ]] || (( LS == 3 || LS == 2 )); then
-      print -u2 -- "[Processed] $1"
+      print -u2 -- "[Processed] $dest"
     else
-      print -u2 -- "[Downloaded] $1"
+      print -u2 -- "[Downloaded] $dest"
     fi
-    print -r --  $LS$'\0'$LINE$'\0'$'\0'$1 >&$lg
+    print -r --  $LS$'\0'$LINE$'\0'$'\0'$dest >&$lg
   else
     err Nonexistant $1
   fi
@@ -802,6 +805,8 @@ __read_config() {
     [[ -e $ZSHDL_CONFIG_DIR/default.ini ]] &&
     CONFIG=$ZSHDL_CONFIG_DIR/default.ini ||
     fatal_err "No config found."
+  elif (($#CONFIG > 1)); then
+    fatal_err "Multiple configs $CONFIG[*] matched."
   fi
 
   dbg "Reading config from $CONFIG"
@@ -948,7 +953,7 @@ ZSHDL_VARIANT=default
 while getopts "hsev:c:" opt; do
     case "$opt" in
         c)
-            CONFIG=$ZSHDL_CONFIG_DIR/$OPTARG.ini
+            CONFIG=($ZSHDL_CONFIG_DIR/$OPTARG*.ini)
             ;;
         e)
             EDIT=true
