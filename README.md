@@ -1,4 +1,4 @@
-# zsh-dl: Dead Simple Downloader
+# zsh-dl: Basic Downloader
 
 `zsh-dl` is a tool for downloading and post-processing files.
 
@@ -29,13 +29,17 @@ dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
   
 - Post-processors for formatting and conversion:
   - Markdown conversion
+  
+  - Define your own universal formatter
 
 - Reads from your clipboard for minimal fuss
-- Uses [peripet](https://github.com/Squirreljetpack/peripet) for hassle-free destination determination
+
+- Uses [pere](https://github.com/Squirreljetpack/pere) if installed for hassle-free destination determination
 
 ### ⚙ Dead Simple Configuration
 
 - Declare handlers and postprocessors for various input types:
+
 - Define different configs for processing input of different types or in different modes
 
 
@@ -64,6 +68,7 @@ dl # read from your clipboard
 The base functionality is pretty sparse. But for my own use case, there's only a few types of behavior I want depending what's on my clipboard, which zsh-dl makes easy to define and invoke[^2]:
 
 - Define handlers directly in Zsh: no fussing about documentation and DSL's.
+
 - Reuse components across different protocols
 
 ```shell
@@ -76,8 +81,8 @@ The base functionality is pretty sparse. But for my own use case, there's only a
 # config/handlers.zsh
 file.fmt_ruff() {
   file=$1
-  [[ -e ~/ruff_$FORMAT_VARIANT.toml ]] &&
-    opts+=(--config ~/ruff_$FORMAT_VARIANT.toml) ||
+  [[ -e ~/ruff_$FORMAT.toml ]] &&
+    opts+=(--config ~/ruff_$FORMAT.toml) ||
     opts=()
   ruff format $opts $1
 }
@@ -91,7 +96,7 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 # format all your files with strict settings
 
 > FORMAT=strict dl --config fmt *
-# or just:
+# or just
 > dl -cf *
 # format all your files with default settings
 ```
@@ -103,7 +108,9 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 ### 📊 Robust Logging & Statistics
 
 - SQLite database tracks history per config
+
 - Skip past executions
+
 - Retry failed downloads
 
 ```shell
@@ -132,10 +139,10 @@ The installer will prompt you for what to name the executable as. The default is
 
 zsh-dl relies on the following external command-line tools. Certain functionality will be disabled without them:
 
-- [peripet](https://github.com/Squirreljetpack/peripet): For determining download destination.
+- [pere](https://github.com/Squirreljetpack/pere): For determining download destination.
 - [sqlite3](https://www.sqlite.org/download.html): For logging.
 - clipboard commands (xclip/pbcopy[^3]): For reading from clipboard.
-[^3]: preinstalled in Mac
+[^3]: preinstalled on Mac
 
 You surely already have these:
 - curl: For HTTP/HTTPS downloads.
@@ -158,7 +165,7 @@ All these can be easily reconfigured through setting variables or writing a hand
 ```
 Usage: dl [-hlesv] [-c name] [--from log_id] […inputs/…log_ids]
 
-Dead simple cli extensible download tool.
+Basic cli extensible download tool.
 
 Options:
   -c <name>         : Sets name.ini in /home/archr/.config/zsh-dl as the config.
@@ -211,26 +218,19 @@ See `dl -v --help`
     - `handler(:processor)="*" # comments are allowed`
   - Handlers are matched sequentially in the order they are defined
   - Use `|` instead of `:` to continue onto other matching handlers
+
 </br>
+
 - Environment variables:
-  - General:
-      - `ZSHDL_CONNECT_TIMEOUT`
-      - `ZSHDL_THREADS`
-      - `ZSHDL_PP_THREADS`
-      - `VERBOSE`
-      - `ZSHDL_OUTPUT_DIR`
-      - `ZSHDL_LOG_DISPLAY_LIMIT`
-      - `ZSHDL_STATE_DIR`
-      - `ZSHDL_CONFIG_DIR`
-  - Advanced:
-      - `ZSHDL_FORCE_PROTO`
+  - General: See `dl -v --help`
   - Specific to the example methods (these are autodetected if not declared):
-      - `CLIPcmd`
-      - `PASTEcmd`
-      - `FORMATPYTHONcmd`
-      - `HTML2MARKDOWNcmd`
-      - `YTDLPcmd`
-      - `GALLERYDLcmd`
+    - `CLIPcmd`
+    - `PASTEcmd`
+    - `FORMATPYTHONcmd`
+    - `HTML2MARKDOWNcmd`
+    - `YTDLPcmd`
+    - `GALLERYDLcmd`
+
 
 </br>
 
@@ -240,21 +240,15 @@ See `dl -v --help`
   - Before running, all corresponding `<name>_*.zsh` files along with the preinstalled `handlers.zsh` and `postprocessors.zsh` in the config directory are sourced.
 
 
-# Future directions
+# Future directions [^4] 
 
-### Todo
-
-- Need to finish writing the usage
-- the logging schema needs a little work to better describe and track execution events and states, as well as to better handle workflows which do not involve files.
 - Create a screenshare
-
-\* Implement retries
-### Improvements [^4] 
 - Use a more powerful expression language than glob
 - Advanced mime detection
 - Lessfilter implementation
 - Generalized composition
 - Draw a diagram
+- Daemonize
 
 
 [^4]: which probably won't happen anytime soon
