@@ -16,17 +16,21 @@
 : ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
 ZSHDL_DB=$ZSHDL_STATE_DIR/log.db
 : ${ZSHDL_CONFIG_DIR:=$HOME/.config/zsh-dl}
+
+CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR)
+
 PROTOCOLS=(HTTP SSH FILE NA)
 
 # (Line Status) LS_CODES
-# 0: Unprocessed/Unhandled
-# 1: Handling
-# 2: HandlerError
-# 3: HandlerSuccess
-# 4: PPError
-# 5: PPSuccess
-# 6: InternalError
+# -2: Unprocessed/Unhandled
+# -1: Handling
+# 0: HandlerSuccess
+# 1: HandlerError
+# 2: PPError
+# 3: PPSuccess
+# 4: InternalError
 
+# Bootstrapping function to conveniently enable or gracefully fail features
 exportCmdVar() {
   local var_name=$1
   shift
@@ -52,17 +56,19 @@ exportCmdVar "FORMATPYTHONcmd" \
   "ruff"
 
 exportCmdVar "HTML2MARKDOWNcmd" \
-  "html2markdown" \
-  "html-to-markdown"
+  "html2markdown"
+
+exportCmdVar "YTDLPcmd" \
+  "yt-dlp"
+
+exportCmdVar "GALLERYDLcmd" \
+  "gallery-dl"
 
 unset -f exportCmdVar
-
 setopt extended_glob
+setopt local_options
 
 ### HANDLERS
-
-# entrypoint
-
 handle_pretransform() {
   proto=${1%%://*}
   stem=${1#*://}
@@ -75,43 +81,35 @@ handle_pretransform() {
   echo $stem
 }
 
+# entrypoint
 handle() {
-  export LS=0
+  export LS=-2
   export LINE=$1
   handle_pretransform $1 | {
     read -r proto
     read -r stem
   }
-  exec {lg}> $LG
-
-  # 
 
   ((VERBOSE>1)) && info proto
 
-  case $proto in
-    http(|s))
-      handle_http $stem
-      ;;
-    ssh)
-      handle_ssh $stem
-      ;;
-    sftp)
-      handle_ssh $stem
-      ;;
-    file)
-      handle_file $stem
-      ;;
-    *)
-      handle_na $LINE
-      return
-    ;;
-  esac
+  handle=handle_$proto
+  if is_function $handle; then
+    $handle $stem
+  else
+    handle_na $LINE
+  fi
 }
 
 internal_err() {
-  err "InternalError" ${funcstack[2]}
+  print -u2 "[InternalError]" "${(j. .)@}"
+  return 1
+}
+
+fatal_err() {
+  print -u2 "[FatalError]" "${(j. .)@}"
   exit 1
 }
+
 
 handle_http() {
   url=$1
@@ -129,11 +127,14 @@ handle_http() {
     patterns=(${(s.:.)pattern})
     if [[ $url == $~patterns[1] ]] && 
     [[ (($#patterns < 2)) || $params == $~patterns[2] ]]; then
-      LS=1
-      handler=${_handler%:*}
-      method=${_handler#$handler}
+      LS=-1
+      handler=${_handler%(\||:)*}
+      _method=${_handler#$handler}
+      seperator=${_method:0:1}
+      method=${_method:1}
+      (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest=$($handler $url $params) &&
+      dest="$($handler $url $params)" &&
       __submit_pp $handler $dest $method
       return
     fi
@@ -142,9 +143,11 @@ handle_http() {
   internal_err
 }
 
+handle_https() {
+  handle_http $@
+}
+
 handle_ssh() {
-  exec 3>&1 > /dev/null
-  
   target=$1
   subpath=${${1#*:}%.git}
   userhost=${1%%:*}
@@ -157,11 +160,14 @@ handle_ssh() {
     if [[ $target == $~patterns[1] ]] && 
     [[ (($#patterns < 2)) || $userhost == $~patterns[2] ]] &&
     [[ (($#patterns < 3)) || $subpath == $~patterns[3] ]]; then
-      LS=1
-      handler=${_handler%:*}
-      method=${_handler#$handler}
+      LS=-1
+      handler=${_handler%(\||:)*}
+      _method=${_handler#$handler}
+      seperator=${_method:0:1}
+      method=${_method:1}
+      (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest=$($handler $userhost $subpath) &&
+      dest="$($handler $userhost $subpath)" &&
       __submit_pp $handler $dest $method
       return
     fi
@@ -170,16 +176,20 @@ handle_ssh() {
   internal_err
 }
 
+handle_sftp() {
+  handle_ssh $@
+}
+
 handle_file() {
   target=$1
 
   if [[ ! -e $target && ! -L $target ]]; then
-     err "Nonexistant" $target
+     internal_err "Nonexistant" $target
      return 1
   fi
 
-	type=$(_get_file_type $target)
-  res="$(file -bI $target)"
+	type=$(get_file_type $target)
+  res="$(file -b --mime $target)"
 	mime=${res%%\; *}
 	encoding=${res#*\; }
   shift 1
@@ -192,12 +202,15 @@ handle_file() {
     [[ (($#patterns < 2)) || $type == $~patterns[2] ]] &&
     [[ (($#patterns < 3)) || $mime == $~patterns[3] ]] &&
     [[ (($#patterns < 4)) || $encoding == $~patterns[4] ]]; then
-      LS=1
-      handler=${_handler%:*}
-      method=${_handler#$handler}
+      LS=-1
+      handler=${_handler%(\||:)*}
+      _method=${_handler#$handler}
+      seperator=${_method:0:1}
+      method=${_method:1}
+      (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest=$($handler $target $type $mime $encoding) &&
-      __submit_pp $handler $dest
+      dest="$($handler $target $type $mime $encoding)" &&
+      __submit_pp $handler $dest $method
       return
     fi
 	done <<< $FILE_HANDLERS
@@ -218,11 +231,14 @@ handle_na() {
   else
     while IFS='=' read -r _handler pattern; do
       if [[ $target == $~pattern ]]; then
-        [[ $_handler != na.default ]] && LS=1
-        handler=${_handler%:*}
-        method=${_handler#$handler}
+        [[ $_handler != na.default ]] && LS=-1
+        handler=${_handler%(\||:)*}
+        _method=${_handler#$handler}
+        seperator=${_method:0:1}
+        method=${_method:1}
+        (( VERBOSE > 1 )) && info handler method
         is_function $handler || internal_err
-        dest=$($handler $target) &&
+        dest="$($handler $target)" &&
         __submit_pp $handler $dest $method
         return
       fi
@@ -232,12 +248,37 @@ handle_na() {
   internal_err
 }
 
+# empty proto_handler for user to use if they want to force some handler methods
+handle_misc() {
+  target=$1
+  shift 1
+
+  while IFS='=' read -r _handler pattern; do
+    if [[ $target == $~pattern ]]; then
+      [[ $_handler != na.default ]] && LS=-1
+      handler=${_handler%(\||:)*}
+      _method=${_handler#$handler}
+      seperator=${_method:0:1}
+      method=${_method:1}
+      (( VERBOSE > 1 )) && info handler method
+      is_function $handler || internal_err
+      dest="$($handler $target)" &&
+      __submit_pp $handler $dest $method
+      return
+    fi
+  done <<< $MISC_HANDLERS
+  
+  internal_err
+}
+
 #### API
+
+# Note on naming: Overrideable functions are named normally, "public" helper functions intended to be called are prefixed with an underscore, and __functions are internal.
 
 ## Handler Defaults
 http.default() {
   target=$1
-  dest="$(_get_dest http $target)"
+  dest="$(get_dest http $target)" || return
   [[ $target != http(|s)://* ]] && target="https://$target"
   [[ -n $2 ]] && target+="?$2"
   info dest
@@ -252,7 +293,7 @@ http.default() {
         opts+=(-o $dest)
       fi
       
-      _success_or_log curl -fL $opts $target || return
+      success_or_log curl -fL $opts $target || return
       ;;
   esac
   
@@ -260,8 +301,10 @@ http.default() {
 }
 
 ssh.default() {
-  dest=$(_get_dest ssh $1)
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz $1 $dest # -u does an update in case we decided to keep the target
+  # Args: user@host, subpath
+  dest="$(get_dest ssh $2)"  || return
+  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return 1 # -u does an update in case we decided to keep the target, :t is due to rsync always copies into directories
+  echo $dest
 }
 
 file.default() {
@@ -273,9 +316,25 @@ na.default() {
   return 1
 }
 
+http.na() {
+  :
+}
+
+ssh.na() {
+  :
+}
+
+file.na() {
+  :
+}
+
+na.na() {
+  :
+}
+
 ## Getters
 
-_get_dest() {
+get_dest() {
   proto=$1
   shift 1
   case $proto in
@@ -285,7 +344,7 @@ _get_dest() {
       mktarget -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
       ;;
     ssh)
-      subpath=${${1##*:}%.git}
+      subpath=${1%.git}
       dest=$subpath:t
       mktarget -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
       ;;
@@ -303,11 +362,11 @@ _get_dest() {
   esac
 }
 
-_get_html_field() {
+get_html_field() {
   sed -n 's:.*<$field>\(.*\)</$field>.*:\1:p' $1 | tr -cd '[a-zA-Z0-9 -_[]()]'
 }
 
-_get_file_type() {
+get_file_type() {
   # provides a char from fdsbcxesp for file, directory, symlink, block-device, char-device, executable, empty, socket, pipe
   if [[ -L $1 ]]; then
     echo "l"
@@ -334,19 +393,35 @@ _get_file_type() {
   fi
 }
 
+get_real() {
+  proto=$1
+  shift 1
+  case $proto in
+    http(|s))
+      curl --silent --output /dev/null --location --write-out '%{url_effective}' $1
+      ;;
+    file)
+      echo $1:P
+      ;;
+    *)
+      echo $1
+    ;;
+  esac
+}
+
 ## Utils
 
 err() {
   # make error red
   print -u2 -- "[ERROR: $1] $2"
   [[ -n $LINE ]] && _log_msg "[ERROR: $1] $2"
+  return 1
 }
 
 warn() {
   # make orange
   ((VERBOSE)) || return
   print -u2 -- "[WARN: $1] $2"
-  _log_msg "[WARN: $1] $2"
 }
 
 info() {
@@ -363,10 +438,42 @@ dbg() {
   ((VERBOSE>1)) && print -u2 -- "[DEBUG] $1"
 }
 
+dbginfo() {
+  ((VERBOSE>1)) || return
+  # make info blue
+  while (($#)); do
+    print -u2 -- "[INFO: $1] ${(P)1}"
+    shift 1
+  done
+}
+
 is_function() {
+  (($# == 1)) || return 1
   [[ -n ${functions[$1]} ]]
 }
-## Display logs
+
+# use success_or_log ..cmd || return on critical commands
+success_or_log() {
+  result="$($@ 2> >(tee /dev/fd/2))"
+  code=$?
+  if ((code)); then
+    [[ -n $LS ]] && LS=1 || LS=2 # LS is unset during pp
+    TAG=${TAG:-$1} _log_msg $result # TAG not implemented
+    return $code
+  fi
+}
+
+failure_or_show() {
+  err_tf=$(mktemp)
+  trap 'rm $err_tf' EXIT
+  output=$($@ 2> >(tee $err_tf >&2)) && echo $output && return
+  [[ -n $LS ]] && LS=1 || LS=2
+  err_msg=$(< $err_tf)
+  _log_msg "[Err: ${funcstack[2]}] $err_msg"
+  return 1
+}
+
+## Log rendering utils
 
 # Strips ANSI codes to get the real string length
 __get_visible_length() {
@@ -390,7 +497,7 @@ __truncate_right() {
   local text=$1
   local width=$2
   if (( $(__get_visible_length $text) > width )); then
-    print -n -- "${text:0:$((width-3))}..."
+    print -n -- "${text:0:$((width-1))}…"
   else
     printf "%-*s" $width $text
   fi
@@ -400,7 +507,7 @@ __truncate_left() {
   local text=$1
   local width=$2
   if (( $(__get_visible_length $text) > width )); then
-    print -n -- "...${text:$(($#text-width))}"
+    print -n -- "…${text:$(($#text-width+1))}"
   else
     printf "%*s" $width $text
   fi
@@ -408,31 +515,39 @@ __truncate_left() {
 
 _get_LS_color() {
   case $1 in
-    0) print -n '\033[90m' ;;      # Muted Grey (for Unprocessed/Unhandled)
-    1) print -n '\033[37m' ;;      # White (for Handling)
-    2|6) print -n '\033[31m' ;;    # Bright Red (for HandlerError & InternalError)
-    3) print -n '\033[32m' ;;      # Green (for HandlerSuccess)
-    4) print -n '\033[38;5;203m' ;; # Softer Red/Salmon (for PPError)
-    5) print -n '\033[34m' ;;      # Blue (for PPSuccess)
-    *) print -n '\033[37m' ;;      # Default to White for any other status
+    -2) print -n '\033[90m' ;;      # Muted Grey (for Unprocessed/Unhandled)
+    -1) print -n '\033[37m' ;;      # White (for Handling)
+    1|4) print -n '\033[31m' ;;    # Bright Red (for HandlerError & InternalError)
+    0) print -n '\033[32m' ;;      # Green (for HandlerSuccess)
+    2) print -n '\033[38;5;203m' ;; # Salmon (for PPError)
+    3) print -n '\033[34m' ;;      # Blue (for PPSuccess)
+    5) print -n '\033[90m' ;;      # Muted Grey (for Skipped)
   esac
 }
 
+# todo: add id row, display a log entry like pueue given (a series) of ids, modify cli to do so
+
+__show_log_entry () {
+  # query for entries
+  for id; do
+
+  done
+}
 __show_log() {
   if [[ ! -f $ZSHDL_DB ]]; then
-    err show_log "Database not found: $ZSHDL_DB"
+    internal_err show_log "Database not found: $ZSHDL_DB"
     return 1
   fi
 
   local data
   data=$(sqlite3 $ZSHDL_DB -separator $'\t' \
     "SELECT LS, target, COALESCE(msg, ' '), COALESCE(dest, ' ')
-     FROM log
+     FROM \"$ZSHDL_VARIANT\"
      ORDER BY id DESC
      LIMIT $ZSHDL_LOG_DISPLAY_LIMIT")
 
   if [[ -z $data ]]; then
-    warn show_log No log entries found
+    warn show_log "No log entries found"
     return 0
   fi
 
@@ -442,8 +557,6 @@ __show_log() {
   local all_data=${headers}$'\n'${data}
 
   local -a col_widths
-  # CORRECTED: Use a 'herestring' (<<<) to pipe data to awk safely.
-  # This prevents the shell from breaking the tab characters.
   col_widths=($(awk -F'\t' '
   {
     for(i=1; i<=NF; i++) {
@@ -459,7 +572,7 @@ __show_log() {
     w4 = (max[4]<20)?20:max[4]; w4 = (w4>60)?60:w4; printf "%d ", w4;
   }' <<< $all_data))
 
-  # --- Build and Print Table ---
+  # Build and Print Table
   local reset_color=$'\033[0m'
   local top_border=+
   local sep_border=+
@@ -510,15 +623,17 @@ __begin_pp() {
   while IFS=$'\0' read -r file method LINE; do
     (($#tasks >= $ZSHDL_PP_THREADS)) && __wait_any
     if [[ -z $method ]]; then
+      LS=0
+      _log_dest $file
+      echo $file
+    elif is_function pp_$method; then
+      dbg "Invoked (Method: $method) for (File: $file)"
+      file=$(pp_$method $file) || return
       LS=3
       _log_dest $file
-    elif is_function pp_$method; then
-      LS=5
-      _log_dest $(pp_$method $file)
-    else
-      LS=6
-      err InvalidPostprocessingMethod "$method for $file"
       echo $file
+    else
+      internal_err InvalidPostprocessingMethod "(Method: $method) for (File: $file)"
     fi &
     tasks+=$!
   done < $1
@@ -526,52 +641,40 @@ __begin_pp() {
 
 __submit_pp() {
   # Args: handler dest (created filename) [method]
-  LS=3
-  _log_dest $2 >/dev/null
-  [[ -z $2 ]] && err InvalidName "Empty filename"
-
-  
-  if method=$3 && [[ -n $method ]]; then
-    [[ $2 == *$'\0'* ]] &&
-      err InvalidName "Files cannot contain null characters ($2)" &&
-      return 1
-      
-    echo $2$'\0'$method$'\0'$LINE >&$pp &&
-    _log_msg "[PP: $method] invoked for $dest"
-
-  elif method=${1#*.} && [[ -n ${functions[pp_$method]} ]]; then
-    [[ $2 == *$'\0'* ]] &&
-      err InvalidName "Files cannot contain null characters ($2)" &&
-      return 1
-    
-    echo $2$'\0'$method$'\0'$LINE >&$pp &&
-    _log_msg "[PP: $method] invoked for $dest"
-
-  else
-    echo $2
+  LS=0
+  if [[ -z $2 ]]; then
+    err InvalidName "Empty filename"
+    return
   fi
+
+  while read -r dest; do
+    _log_dest $dest >/dev/null || continue
+
+    if method=$3 && [[ -n $method ]]; then
+      [[ $dest == *$'\0'* ]] &&
+        err InvalidName "Files cannot contain null characters ($dest)" &&
+        return 1
+        
+      echo $dest$'\0'$method$'\0'$LINE >&$pp &&
+      _log_msg "[PP: $method] invoked for $dest"
+
+    elif method=${1#*.} && [[ -n ${functions[pp_$method]} ]]; then
+      [[ $dest == *$'\0'* ]] &&
+        err InvalidName "Files cannot contain null characters ($dest)" &&
+        return 1
+      
+      echo $dest$'\0'$method$'\0'$LINE >&$pp &&
+      _log_msg "[PP: $method] invoked for $dest"
+
+    else
+      echo $dest
+    fi
+  done <<< "$2"
 }
 
 
 
 ### BEGIN LOGIC
-
-
-# use _success_or_log ..cmd || return on critical commands
-_success_or_log() {
-  result=$($@ 2> >(tee /dev/fd/2))
-  code=$?
-  if ((code)); then
-    LS=2 TAG=${TAG:-$1} _log_msg $result
-    return $code
-  fi
-  # need sqlite db
-  # todo: better logging (replace /dev/null)
-  # something like: target, dest, msg, LS (unhandled, failed, pp error, success)
-  # problem is capturing msg to stderr and processing - can use &> | tee /dev/fd/$myfd, just not sure if we want stdout of any of git clone/rsync/curl.
-  # probably best is to have a seperate log file for each file which is written to, the file is renamed based on LS code
-  #... since we can submit target+dest and have the logger look for dest to replace with pp.
-}
 
 __wait_any() {
   while true; do
@@ -587,7 +690,7 @@ __wait_any() {
 
 __output() {
   if [ -t 1 ]; then
-    tee >(${=CLIPcmd})
+    tee >(${=CLIPcmd})& # important!
   else
     cat
   fi
@@ -595,11 +698,10 @@ __output() {
 
 __input() {
   if (($#)); then
-    print -l -- $@
+    print -rl -- $@
   else
-    if [ -t 0 ]; then
-      ${=PASTEcmd}
-      echo
+    if $STDIN; then
+      echo "$(${=PASTEcmd})" # buffer
     else
       cat
     fi
@@ -607,37 +709,42 @@ __input() {
 }
 
 __begin_lg() {
-  mkdir -p $ZSHDL_STATE_DIR || err Logging "Could not initialize logging directory $ZSHDL_STATE_DIR/.temp"
-  sqlite3 $ZSHDL_DB "CREATE TABLE IF NOT EXISTS log (id INTEGER PRIMARY KEY, target TEXT, LS INTEGER, msg TEXT, dest TEXT);"
+  mkdir -p $ZSHDL_STATE_DIR || internal_err Logging "Could not initialize logging directory $ZSHDL_STATE_DIR/.temp"
+  sqlite3 $ZSHDL_DB "CREATE TABLE IF NOT EXISTS \"$ZSHDL_VARIANT\" (id INTEGER PRIMARY KEY, target TEXT, LS INTEGER, msg TEXT, dest TEXT);"
 
-  ((VERBOSE>2)) && print -u2 "sqlite logging database: $ZSHDL_DB"
+  dbg "sqlite logging database: $ZSHDL_DB"
 
 
-  _fields=(target msg dest)
-  
+  _fields=(target msg _dest)
+
   while IFS=$'\0' read -r LS $_fields; do
-    [[ $LS == [0-9] ]] || {
-       err "Logging" "Empty LS"
+    [[ -z $LS ]] && continue
+
+    [[ $LS == (-|)[0-5] ]] || {
+      dbg "[Logging: Invalid LS] $LS"
       continue
     }
+
     if [[ -n $target ]]; then
-      target="'$(sed "s/'//g" <<< $target)'"
+      target="'${target//\'/}'"
     else
-      err "Logging" "Empty target"
+      dbg "Logging: Empty target"
       continue
     fi
     if [[ -n $msg ]]; then
+      target="'${msg//\'/}'"
       msg="'$(sed "s/'//g" <<< $msg)'"
     else
       msg=NULL
     fi
-    if [[ -n $dest ]]; then
-      dest="'$(sed "s/'//g" <<< $dest)'"
+    if [[ -n $_dest ]]; then
+      _dest="'${_dest//\'/}'"
     else
-      dest=NULL
+      _dest=NULL
     fi
 
-    sql_query="INSERT INTO log (target, LS, msg, dest) VALUES ($target, $LS, $msg, $dest);"
+    sql_query="INSERT INTO \"$ZSHDL_VARIANT\" (target, LS, msg, dest) VALUES ($target, $LS, $msg, $_dest);"
+
     sqlite3 "$ZSHDL_DB" $sql_query
   done < $1
 
@@ -645,14 +752,34 @@ __begin_lg() {
 }
 
 _log_msg() {
-  echo $LS$'\0'$LINE$'\0'$1$'\0' >&$lg
+  [[ -z $LS || -z $LINE || -z $1 ]] && return 1
+
+  msg=${${1%%$'\n'##}//$'\n'/' \\\\ '}
+    # print -u2 "Error: missing one of LS: $LS, LINE: $LINE, MSG: $1" ||
+  print -r -- $LS$'\0'$LINE$'\0'$1$'\0' >&$lg
 }
 
 _log_dest() {
+  if [[ $1 == '# '* ]]; then
+    local entry=${1#'# '}
+    if [[ -e $entry ]]; then
+      print -u2 -- "[Skipped] $entry"
+      print -r -- 5$'\0'$LINE$'\0'$'\0'$entry >&$lg
+    else
+      err Nonexistant $entry
+    fi
+    return 5
+  fi
+
   if [[ -e $1 ]]; then
-    echo $LS$'\0'$LINE$'\0'$'\0'$1 >&$lg
+    if [[ -z $LS ]] || (( LS == 3 || LS == 2 )); then
+      print -u2 -- "[Processed] $1"
+    else
+      print -u2 -- "[Downloaded] $1"
+    fi
+    print -r --  $LS$'\0'$LINE$'\0'$'\0'$1 >&$lg
   else
-    err Nonexistant "$1"
+    err Nonexistant $1
   fi
 }
 
@@ -669,91 +796,89 @@ __assert_config_exists() {
 }
 
 __read_config() {
+  [[ ! -d $ZSHDL_CONFIG_DIR ]] && fatal_err "Configuration directory not found (ZSHDL_CONFIG_DIR @ '$ZSHDL_CONFIG_DIR'). Please check your installation."
+
   if [[ -z $CONFIG ]]; then
     [[ -e $ZSHDL_CONFIG_DIR/default.ini ]] &&
     CONFIG=$ZSHDL_CONFIG_DIR/default.ini ||
-    warn ConfigNotFound "No .ini config specified."
+    fatal_err "No config found."
   fi
 
-  files=($ZSHDL_CONFIG_DIR/handlers.zsh $ZSHDL_CONFIG_DIR/postprocessors.zsh)
+  dbg "Reading config from $CONFIG"
+  offenders=$(__check_config) && ZSHDL_VARIANT=$CONFIG:r:t || {
+    fatal_err "Invalid config"
+  }
+
+  typeset -U files
+  files=($ZSHDL_CONFIG_DIR/handlers.zsh $ZSHDL_CONFIG_DIR/postprocessors.zsh $ZSHDL_CONFIG_DIR/$ZSHDL_VARIANT_*.zsh(N))
+  
   for f in $files; do
-    [[ -e $f ]] && source $f || warn ConfigNotFound "$f not found, skipping."
+    [[ -f $f ]] && source $f || warn ConfigNotFound "$f not found, skipping."
   done
 
-  if [[ -e $CONFIG ]] && offenders=$(__check_config); then
-    dbg "Reading config from $CONFIG"
+  for proto in $PROTOCOLS; do
+    export ${proto}_HANDLERS=""
+  done
 
-    for proto in $PROTOCOLS; do
-      typeset -A _${proto}_HANDLERS
-    done
+  while IFS='=' read -r key val; do
+    [[ ${key%%\#*} == ([[:space:]]##|) ]] && continue
+    [[ -z $val ]] && warn EmptyKeyFound $key && continue
+    case $key in
+      ZSHDL_CONNECT_TIMEOUT|ZSHDL_THREADS|ZSHDL_PP_THREADS|VERBOSE|ZSHDL_FORCE_PROTO|ZSHDL_OUTPUT_DIR|ZSHDL_LOG_DISPLAY_LIMIT)
+        : ${(P)key:=$val}
+        ;;
+      http(|s).*)
+        # postprocessor decoration found
+        [[ $key != *(:|\|)* ]] && key+=:
+        eval "val=$val"
+        HTTP_HANDLERS+="$key=$val"$'\n'
 
-    while IFS='=' read -r key val; do
-      [[ ${key%%\#*} == ([[:space:]]##|) ]] && continue
-      [[ -z $val ]] && warn EmptyKeyFound "$key" && continue
-      case $key in
-        ZSHDL_CONNECT_TIMEOUT|ZSHDL_THREADS|ZSHDL_PP_THREADS|VERBOSE|ZSHDL_FORCE_PROTO|ZSHDL_OUTPUT_DIR|ZSHDL_LOG_DISPLAY_LIMIT)
-          : ${(P)key:=$val}
+        dbg "Registered $key for $val"
+        ;;
+      ssh.*|sftp.*)
+        [[ $key != *(:|\|)* ]] && key+=:
+        eval "val=$val"
+        SSH_HANDLERS+="$key=$val"$'\n'
 
-          ;;
-        http(|s).*)
-          method=${val##*\# : }
-          # postprocessor decoration found
-          if [[ $method != $val ]]; then
-            dbg "Registered postprocessing method ($method) for $key"
-          fi
-          eval "val=$val"
-          _HTTP_HANDLERS["$key":$method]=$val
-          ;;
-        ssh.*|sftp.*)
-          method=${val##*\# : }
-          # postprocessor decoration found
-          if [[ $method != $val ]]; then
-            dbg "Registered postprocessing method ($method) for $key"
-          fi
-          eval "val=$val"
-          _SSH_HANDLERS["$key":$method]=$val
-          ;;
-        file.*)
-          method=${val##*\# : }
-          # postprocessor decoration found
-          if [[ $method != $val ]]; then
-            dbg "Registered postprocessing method ($method) for $key"
-          fi
-          eval "val=$val"
-          _FILE_HANDLERS["$key":$method]=$val
-          ;;
-        na.*)
-          method=${val##*\# : }
-          # postprocessor decoration found
-          if [[ $method != $val ]]; then
-            dbg "Registered postprocessing method ($method) for $key"
-          fi
-          eval "val=$val"
-          _NA_HANDLERS["$key":$method]=$val
-          ;;
-      esac
-    done < $CONFIG
+        dbg "Registered $key for $val"
+        ;;
+      file.*)
+        [[ $key != *(:|\|)* ]] && key+=:
+        eval "val=$val"
+        FILE_HANDLERS+="$key=$val"$'\n'
 
-    for proto in $PROTOCOLS; do
-      protodict=_"$proto"_HANDLERS
-      export "$proto"_HANDLERS="$(for k v in "${(@Pkv)protodict}"; do echo "$k=$v"; done; echo "$proto:l".default=\*)"
-    done
+        dbg "Registered $key for $val"
+        ;;
+      na.*)
+        [[ $key != *(:|\|)* ]] && key+=:
+        eval "val=$val"
+        NA_HANDLERS+="$key=$val"$'\n'
 
-  else
-    err "InvalidConfig" "Errors found in $offenders[*]."
-    exit 1
-  fi
+        dbg "Registered $key for $val"
+        ;;
+    esac
+  done < $CONFIG
+
+  for proto in $PROTOCOLS; do
+    protoh="${proto}_HANDLERS"
+    : ${(P)protoh::="${(P)protoh}${proto:l}.default:=*"$'\n'}
+  done
 }
 
 __check_config() {
-  :
+  if ! [[ $CONFIG:r:t == [a-zA-Z0-9_-]## ]]; then
+    internal_err "Config name ($CONFIG:r:t) must be alphanumeric"
+    return 1
+  fi
+  [[ -f $CONFIG ]]
+  # err "InvalidConfig" "Errors found in $offenders[*]."
 }
 
 __edit_config() {
   local i file files
   i=1
 
-  files=($ZSHDL_CONFIG_DIR/*.ini(N) $ZSHDL_CONFIG_DIR/handlers.zsh(N) $ZSHDL_CONFIG_DIR/postprocessors.zsh(N))
+  files=("Clear Database" $ZSHDL_CONFIG_DIR/*.ini(N) $ZSHDL_CONFIG_DIR/*.zsh(N))
   for file in ${files[@]}; do
     echo "$i) $file"
     ((i++))
@@ -761,6 +886,12 @@ __edit_config() {
   print -n "Enter a number to edit: "
   read -r i
   [[ -n $files[i] ]] || exit 1
+
+  if [[ $files[i] == "Clear Database" ]]; then
+    rm $ZSHDL_DB || internal_err "Could not delete database"
+    exit
+  fi
+
   ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $files[i]
   __check_config
   exit $?
@@ -768,10 +899,20 @@ __edit_config() {
 
 _display_api() {
   api=(http.default ssh.default file.default)
-  api+=(_get_dest _success_or_log)
+  api+=(get_dest failure_or_show success_or_log)
   for f in $api; do
     which $f
   done
+
+  if ((VERBOSE>2)); then
+    echo
+    echo "CONSTANTS"
+    echo
+    for c in $CONSTANTS; do
+      print -- "$c: ${(P)c}"
+    done
+  fi
+  echo
 }
 
 ### BEGIN
@@ -802,7 +943,9 @@ EDIT=false
 SHOWLOG=false
 SCRIPT="$(readlink -f -- "$0")"
 PROG="$(basename "$0")"
-while getopts "hsevc:" opt; do
+ZSHDL_VARIANT=default
+
+while getopts "hsev:c:" opt; do
     case "$opt" in
         c)
             CONFIG=$ZSHDL_CONFIG_DIR/$OPTARG.ini
@@ -811,7 +954,13 @@ while getopts "hsevc:" opt; do
             EDIT=true
             ;;  
         v)
-            VERBOSE=2
+            # not perfect but goog enough
+            if [[ $OPTARG == -* ]]; then
+              VERBOSE=2
+              ((OPTIND--))
+            else
+              VERBOSE=$OPTARG
+            fi
             ;;
         h)
             ((VERBOSE>1)) && _display_api
@@ -828,7 +977,16 @@ done
 shift $((OPTIND - 1))
 
 __read_config $CONFIG
-$SHOWLOG && __show_log && exit
+
+if $SHOWLOG; then
+  if (($#)); then
+    __show_log_entries $@
+  else
+    __show_log
+  fi
+  exit
+fi
+
 $EDIT && __edit_config $CONFIG
 
 # Begin
@@ -844,7 +1002,7 @@ exec {pp}> $PP
 
 tasks=()
 __input $@ | while read -r line && [[ -n $line ]]; do
-  (($#tasks >= $ZSHDL_THREADS)) && __wait_any
+  (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
   handle $line | __output &
   tasks+=$!
 done
@@ -852,5 +1010,7 @@ done
 exec {pp}>&-
 exec {lg}>&-
 rm $LG $PP
+
+
 wait $PP_ID
-wait $LG_ID
+# wait $LG_ID

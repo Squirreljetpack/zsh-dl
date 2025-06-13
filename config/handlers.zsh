@@ -19,8 +19,21 @@ http.gutenberg() {
 	http.default $url # downloads the url and outputs the destination filename
 }
 
-http.ytdlp() {
-	yt-dlp -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" --abort-on-unavailable-fragments --print after_move:filepath $url # i have no idea what options are good
+_http.dl() {
+  $YTDLPcmd \
+	  -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
+	  --abort-on-unavailable-fragments \
+	  --print after_move:filepath \
+	  $1 ||
+  $GALLERYDLcmd \
+	  -D . \
+	  $1
+	# i have no idea what options are good
+}
+
+http.dl() {
+  setopt -o pipefail
+  failure_or_show _http.dl $1
 }
 
 # Downloads folders, images, or single branches of repositories from github/gitlab/huggingface. Only github is fully supported.
@@ -39,11 +52,13 @@ http.git() {
 
   if [[ -n $sep ]]; then
     ref=${${rest%%/*}%%\?*}
-    subdir=${rest#*/}
+    subdir=${${rest#$ref}#/}
     ref_path="$(get_ref_path $ref)"
   fi
 
-  if [[ -z $sep || $root != github.com ]]; then
+  dbginfo subdir ref
+
+  if [[ -z $subdir || $root != github.com ]]; then
     if [[ $ref_path == refs/heads/* ]]; then
       branch=${ref_path#refs/heads/}
       info branch
@@ -51,8 +66,7 @@ http.git() {
     else
       _ARGS=""
     fi
-    target="git@$root:$user_repo.git"
-    _ARGS=$_ARGS ssh.clone $target
+    _ARGS=$_ARGS ssh.clone git@$root $user_repo.git
     return
   fi
 
@@ -73,8 +87,8 @@ http.git() {
   info user_repo archive_url temp_dir
   
   # strip components=1: maps root/ -> .
-  if curl -sL "$archive_url" | _success_or_log tar -xzf - --directory "$temp_dir" --strip-components=1 "${archive_root}/${subdir}"; then
-    dest=$(_get_dest file $temp_dir/${subdir})
+  if curl -sL "$archive_url" | success_or_log tar -xzf - --directory "$temp_dir" --strip-components=1 "${archive_root}/${subdir}"; then
+    dest="$(get_dest file $temp_dir/${subdir})" || return
     mv $temp_dir/${subdir} ./
     rm -r $temp_dir
   else
@@ -85,10 +99,10 @@ http.git() {
 
 
 ####### SSH #######
-# Args: target, userhost, subpath
+# Args: userhost, subpath
 
 ssh.info() {
-  ssh -vT $2
+  ssh -vT $1
 }
 
 # Example:
@@ -96,8 +110,8 @@ ssh.info() {
 # Then ssh.handlers are passed:  user@host:path/to/file user@host path/to/file
 
 ssh.clone() {
-	dest=$(_get_dest ssh $1) # get_dest provides an valid destination path for the protocol, given a target ($1 for any handler). You can also do this yourself.
-	_success_or_log git clone --single-branch ${=_ARGS} $1 $dest || return # _ARGS is included to allow passing arguments to git clone when manually invoked, see http_git.
+	dest="$(get_dest ssh $2)" || return # get_dest provides an valid destination path for the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
+	success_or_log git clone --single-branch ${=_ARGS} $1:$2 $dest || return # _ARGS is included to allow passing arguments to git clone when manually invoked, see http_git.
   echo $dest
 }
 

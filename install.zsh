@@ -14,7 +14,8 @@ done
 print -n -- "What name should ZSHDL be installed to?: (dl)"
 read -r name
 : ${name:=dl}
-mktarget -c $f $ZSHDL_INSTALL_DIR/$name >/dev/null
+mktarget -c zsh-dl $ZSHDL_INSTALL_DIR/$name >/dev/null
+
 
 echo "Installation complete!" 
 echo "Try $name https://github.com/Squirreljetpack/ZSHDL/tree/zsh-dl, to download a github folder to your current directory, or $name https://gutenberg.org/ebooks/18328 to download a book as markdown! (JohannesKaufmann/html-to-markdown is required)"
