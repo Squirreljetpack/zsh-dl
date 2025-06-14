@@ -48,6 +48,11 @@ dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
 http.my_handler="example.com/*" # Handle urls beginning with example.com/ with an http.myhandler you define
 http.default:markdown="*" # Download all other http/s urls with curl, and convert them to markdown
 
+# Additionally:
+# - using | as the first seperator allows matching multiple patterns
+# - and multiple processors can be chained, like so:
+# http.default|markdown:htmlify
+
 ZSHDL_THREADS=5 # 5 download threads
 ```
 
@@ -242,11 +247,10 @@ See `dl -v --help`
 
 # Future directions [^4] 
 
-- Create a screenshare
 - Use a more powerful expression language than glob
 - Advanced mime detection
 - Lessfilter implementation
-- Generalized composition
+- Even more generalized composition
 - Draw a diagram
 - Daemonize
 
