@@ -13,7 +13,11 @@ dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
 
 [^1]: External dependencies are required.
 
+https://github.com/user-attachments/assets/58ff52a5-f794-4466-a702-05071a963389
+
+
 ## Key Features
+
 
 ### 🚀 Plug and Play
 
@@ -42,7 +46,6 @@ dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
 
 - Define different configs for processing input of different types or in different modes
 
-
 ```ini
 # config/default.ini
 http.my_handler="example.com/*" # Handle urls beginning with example.com/ with an http.myhandler you define
@@ -66,7 +69,6 @@ dl < urls.txt
 dl # read from your clipboard
 
 ```
-
 
 ### 🧩 Elegant Extension System
 
@@ -109,6 +111,8 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 [^2]: ok yes it does feel kinda useless considering that its not much harder to just call curl or rsync. But the github download is useful imo, reduced cognitive load is always nice, and maybe the other parts might be of use to someone else. Also, have I mentioned its dead simple?
 
 See [Configuration](#handlers-and-preprocessors) for the actual inputs provided to and outputs expected of these handlers.
+
+
 
 ### 📊 Robust Logging & Statistics
 

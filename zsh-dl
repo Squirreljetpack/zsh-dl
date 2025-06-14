@@ -619,7 +619,7 @@ __show_log() {
     fi
   done
 
-  print "Last $ZSHDL_LOG_DISPLAY_LIMIT Log Entries"
+  print "Displaying logs for the $ZSHDL_VARIANT config:"
   print "$top_border"
   printf "│ %s │ %s │ %s │ %s │ %s │ %s │\n" \
     "$(__center_text 'ID' "${col_widths[1]}")" \
@@ -1186,7 +1186,7 @@ Examples:
     Download book #76257 as a markdown file
   $PROG "https://github.com/sumoduduk/terminusdm/tree/main/src"
     Download the src/ folder of the sumoduduk/terminusdm in the main branch to the current directory
-  $PROG "user@host:path/to/your/file.tx
+  $PROG "user@host:path/to/your/file.tx"
     Downloads over SSH
   $PROG -ci "google.com"
     Gets info about a URL/file
@@ -1331,11 +1331,14 @@ trap "rm $PP $LG" EXIT
 tasks=()
 
 
-__input $@ | while { $ZSHDL_STRIPWHITESPACE && IFS=; read -r line;} ; do
-  (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
-  { handle $line </dev/tty | __output; } &
-  tasks+=$!
-done
+__input $@ | {
+$ZSHDL_STRIPWHITESPACE && IFS=
+  while read -r line; do
+    (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
+    { handle $line </dev/tty | __output; } &
+    tasks+=$!
+  done
+}
 
 exec {pp}>&-
 exec {lg}>&-
