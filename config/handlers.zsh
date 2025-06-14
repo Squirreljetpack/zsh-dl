@@ -4,6 +4,7 @@
 http.info() {
   url=$1
   params=$2
+  exec >&2
 
   [[ -n $params ]] && params="?$params"
   if have httpstat; then
@@ -89,15 +90,13 @@ http.git() {
   temp_dir="$(mktemp -d)"
 
   info user_repo archive_url temp_dir
-  
+
   # strip components=1: maps root/ -> .
   if curl -sL "$archive_url" | success_or_log tar -xzf - --directory "$temp_dir" --strip-components=1 "${archive_root}/${subdir}"; then
-    dest="$(get_dest file $temp_dir/${subdir})" || return
-    mv $temp_dir/${subdir} ./
+    read_dest file $temp_dir/${subdir} || return 0
+    pere -m $temp_dir/${subdir} $dest >/dev/null
     rm -r $temp_dir
-  else
-    err "Extraction failure" "${subdir}" >&2
-    return 1
+    echo $dest:t
   fi
 }
 
@@ -106,7 +105,7 @@ http.git() {
 # Args: userhost, subpath
 
 ssh.info() {
-  ssh -vT $1
+  ssh -vT $1 >&2
 }
 
 # Example:
@@ -114,7 +113,7 @@ ssh.info() {
 # Then ssh.handlers are passed:  user@host:path/to/file user@host path/to/file
 
 ssh.clone() {
-	dest="$(get_dest ssh $2)" || return # get_dest provides an valid destination path for the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
+	read_dest ssh $2 || return 0 # read_dest provides a valid destination path to the dest variable given the path-like component corresponding to the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
 	success_or_log git clone --single-branch ${=_ARGS} $1:$2 $dest || return # _ARGS is included to allow passing arguments to git clone when manually invoked, see http_git.
   echo $dest
 }
@@ -138,16 +137,16 @@ file.info() {
 
 file.fmt_py() {
   [[ -e ~/ruff_$FORMAT.toml ]] && opts+=(--config ~/ruff_$FORMAT.toml) || opts=()
-  ruff format $opts $1
+  failure_or_show ruff format $opts $1
 }
 
 file.fmt_biome() {
   [[ -e ~/biome_$FORMAT.toml ]] && opts=(--config-path ~/biome_$FORMAT.toml) || opts=()
-  biome format $opts $1
+  failure_or_show biome format $opts $1
 }
 
 file.fmt_sh() {
-  shellfmt format $1
+  failure_or_show shfmt -w $1
 }
 
 

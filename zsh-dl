@@ -18,9 +18,9 @@ handle_pretransform() {
 
 # entrypoint
 handle() {
-  export LS=-2
-  export LINE=$1
-  [[ -n $LINE ]] || return
+  export LS=-3
+  export TARGET=$1
+  [[ -n $TARGET ]] || return
   handle_pretransform $1 | {
     read -r proto
     read -r stem
@@ -32,7 +32,7 @@ handle() {
   if is_function $handle; then
     $handle $stem
   else
-    handle_na $LINE
+    handle_na $TARGET
   fi
 }
 
@@ -53,7 +53,7 @@ handle_http() {
     patterns=(${(s.:.)pattern})
     if [[ $url == $~patterns[1] ]] && 
     [[ (($#patterns < 2)) || $params == $~patterns[2] ]]; then
-      LS=-1
+      LS=-3
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -61,8 +61,8 @@ handle_http() {
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
       dest="$($handler $url $params)" &&
-      __submit_pp $handler $dest $method
-      return
+      __submit_pp $dest $method
+      [[ $seperator == : ]] && return
     fi
   done <<< $HTTP_HANDLERS
 
@@ -86,7 +86,7 @@ handle_ssh() {
     if [[ $target == $~patterns[1] ]] && 
     [[ (($#patterns < 2)) || $userhost == $~patterns[2] ]] &&
     [[ (($#patterns < 3)) || $subpath == $~patterns[3] ]]; then
-      LS=-1
+      LS=-3
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -94,8 +94,8 @@ handle_ssh() {
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
       dest="$($handler $userhost $subpath)" &&
-      __submit_pp $handler $dest $method
-      return
+      __submit_pp $dest $method
+      [[ $seperator == : ]] && return
     fi
   done <<< $SSH_HANDLERS
 
@@ -128,7 +128,7 @@ handle_file() {
     [[ (($#patterns < 2)) || $type == $~patterns[2] ]] &&
     [[ (($#patterns < 3)) || $mime == $~patterns[3] ]] &&
     [[ (($#patterns < 4)) || $encoding == $~patterns[4] ]]; then
-      LS=-1
+      LS=-3
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -136,8 +136,8 @@ handle_file() {
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
       dest="$($handler $target $type $mime $encoding)" &&
-      __submit_pp $handler $dest $method
-      return
+      __submit_pp $dest $method
+      [[ $seperator == : ]] && return
     fi
 	done <<< $FILE_HANDLERS
 
@@ -157,7 +157,7 @@ handle_na() {
   else
     while IFS='=' read -r _handler pattern; do
       if [[ $target == $~pattern ]]; then
-        [[ $_handler != na.default ]] && LS=-1
+        [[ $_handler != na.default ]] && LS=-3
         handler=${_handler%(\||:)*}
         _method=${_handler#$handler}
         seperator=${_method:0:1}
@@ -165,8 +165,8 @@ handle_na() {
         (( VERBOSE > 1 )) && info handler method
         is_function $handler || internal_err
         dest="$($handler $target)" &&
-        __submit_pp $handler $dest $method
-        return
+        __submit_pp $dest $method
+      [[ $seperator == : ]] && return
       fi
     done <<< $NA_HANDLERS
   fi
@@ -181,7 +181,7 @@ handle_misc() {
 
   while IFS='=' read -r _handler pattern; do
     if [[ $target == $~pattern ]]; then
-      [[ $_handler != na.default ]] && LS=-1
+      [[ $_handler != na.default ]] && LS=-3
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -189,8 +189,8 @@ handle_misc() {
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
       dest="$($handler $target)" &&
-      __submit_pp $handler $dest $method
-      return
+      __submit_pp $dest $method
+      [[ $seperator == : ]] && return
     fi
   done <<< $MISC_HANDLERS
   
@@ -207,10 +207,9 @@ http.default() {
   : output: successfully created files, one per line
   :
   target=$1
-  dest="$(get_dest http $target)" || return
+  read_dest http $target || return 0
   [[ $target != http(|s)://* ]] && target="https://$target"
   [[ -n $2 ]] && target+="?$2"
-  info dest
   shift 1
   
   case $dest in
@@ -233,7 +232,7 @@ ssh.default() {
   : args: user@host subpath
   : output: successfully created files, one per line
   :
-  dest="$(get_dest ssh $2)"  || return
+  read_dest ssh $2  || return 0
   success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return 1 # -u does an update in case we decided to keep the target, :t is due to rsync always copies into directories
   echo $dest
 }
@@ -247,7 +246,7 @@ file.default() {
 
 na.default() {
   warn Unhandled "\"$1\""
-  LS=-2 _log_msg "[Unhandled]"
+  _log_skipped
   return 1
 }
 
@@ -269,35 +268,36 @@ na.na() {
 
 ## Getters
 
-get_dest() {
-  : arg: protocol "<a path-like string>"
-  : output: "<a valid destination for $2>"
+read_dest() {
+  : arg: protocol '<a path-like string>' '[...pere_args]'
+  : output: 'stores <a valid destination for $2> into the variable dest, otherwise returns 1 and outputs "# " (logs the task as skipped)'
+  : notes: 'Prompts the user in case of conflict. Ex.' 'read_dest file $1:r.md -a && echo $dest || return 0'
   :
   proto=$1
   shift 1
   case $proto in
     http(|s))
-      dest=${${1%/\#[^\#/]##}:t} # strip #id
-      [[ -z $dest:e ]] && dest+=.html
-      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      _dest=${${1%/\#[^\#/]##}:t} # strip #id
+      [[ -z $dest:e ]] && _dest+=.html
       ;;
     ssh)
       subpath=${1%.git}
-      dest=$subpath:t
-      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      _dest=$subpath:t
       ;;
     (|s)ftp)
-      dest=$1:t
-      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      _dest=$1:t
       ;;
     file)
-      dest=$1:t
-      pere -d ${@:2} $ZSHDL_OUTPUT_DIR$dest
+      _dest=$1:t
       ;;
     *)
-      return 1
+      false
     ;;
   esac
+  dest="$(pere -d ${@:2} $ZSHDL_OUTPUT_DIR$_dest)" || {
+    echo "# $_dest"
+    return 1
+  }
 }
 
 get_html_field() {
@@ -360,9 +360,9 @@ fatal_err() {
 }
 
 err() {
-  # make error red
+  # todo make error red
   print -u2 -- "[ERROR: $1] $2"
-  [[ -n $LINE ]] && _log_msg "[ERROR: $1] $2"
+  [[ -n $TARGET ]] && _log_msg "[ERROR: $1] $2"
   return 1
 }
 
@@ -377,7 +377,7 @@ info() {
   # make info blue
   while (($#)); do
     print -u2 -- "[INFO: $1] ${(P)1}"
-    ((VERBOSE>1)) && _log_msg "[INFO: $1] ${(P)1}"
+    [[ -n $TARGET ]] && ((VERBOSE>1)) && _log_msg "[INFO: $1] ${(P)1}"
     shift 1
   done
 }
@@ -408,8 +408,7 @@ success_or_log() {
   result="$($@ 2> >(tee /dev/fd/2))"
   code=$?
   if ((code)); then
-    [[ -n $LS ]] && LS=1 || LS=2 # LS is unset during pp
-    TAG=${TAG:-$1} _log_msg $result # TAG not implemented
+    LS=$code TAG=${TAG:-$1} _log_msg $result # TAG not implemented
     return $code
   fi
 }
@@ -419,13 +418,19 @@ failure_or_show() {
   : outputs stdin on sucess, logs stderr on failure
   : use "failure_or_show" on the final step if it is failable
   :
-  err_tf=$(mktemp)
+  err_tf="$(mktemp)"
   trap 'rm $err_tf' EXIT
-  output=$($@ 2> >(tee $err_tf >&2)) && echo $output && return
-  [[ -n $LS ]] && LS=1 || LS=2
-  err_msg=$(< $err_tf)
-  _log_msg "[Err: ${funcstack[2]}] $err_msg"
-  return 1
+  output=$($@ 2> >(tee $err_tf >&2))
+  code=$?
+  if ((code)); then
+    err_msg="$(< $err_tf)"
+    LS=$code err ${funcstack[2]} $err_msg
+    return 1
+  else
+    echo $output
+    return
+  fi
+
 }
 
 ## Log rendering utils
@@ -473,13 +478,12 @@ __truncate_left() {
 RESET_COLOR=$'\033[0m'
 _get_LS_color() {
   case $1 in
-    -2) print -n '\033[90m' ;;      # Muted Grey (for Unprocessed/Unhandled)
-    -1) print -n '\033[37m' ;;      # White (for Handling)
-    1|4) print -n '\033[31m' ;;    # Bright Red (for HandlerError & InternalError)
-    0) print -n '\033[32m' ;;      # Green (for HandlerSuccess)
-    2) print -n '\033[38;5;203m' ;; # Salmon (for PPError)
-    3) print -n '\033[34m' ;;      # Blue (for PPSuccess)
-    5) print -n '\033[90m' ;;      # Muted Grey (for Skipped)
+    -2) print -n '\033[90m' ;;      # Muted Grey (for Skipped)
+    -1) print -n   '\033[34m' ;;      # Blue (for partial success)
+    0) print -n '\033[32m' ;;      # Green (for total success)
+    -*) print -n '\033[37m' ;;      # White (for misc?)
+    *) print -n '\033[31m' ;;    # Bright Red (for Errors)
+    # 2) print -n '\033[38;5;203m' ;; # Salmon
   esac
 }
 __show_log_entries() {
@@ -653,58 +657,49 @@ __show_log() {
 # entrypoint
 __begin_pp() {
   tasks=()
-  while IFS=$'\0' read -r file method LINE; do
-    (($#tasks >= $ZSHDL_PP_THREADS)) && __wait_any
-    if [[ -z $method ]]; then
-      LS=0
-      _log_dest $file
-      echo $file
-    elif is_function pp_$method; then
-      dbg "Invoked (Method: $method) for (File: $file)"
-      file=$(pp_$method $file) || return
-      LS=3
-      _log_dest $file
-      echo $file
+  export INPUT
+  export TARGET
+  while IFS=$'\0' read -r INPUT _method TARGET; do
+    [[ -z $pp ]] && 
+    method=${_method%%:*}
+    [[ $method != $_method ]] && rest=${_method#$method:} || rest=
+
+    if is_function pp_$method; then
+      (($#tasks >= $ZSHDL_PP_THREADS)) && __wait_any
+
+      dbg "Invoked (Method: $method) for (Input: $INPUT)"
+      {
+        if dest="$(pp_$method $INPUT)"; then
+          exec {pp} > $1
+          __submit_pp $dest $rest
+          exec {pp}>&-
+        fi
+      } &
     else
-      internal_err InvalidPostprocessingMethod "(Method: $method) for (File: $file)"
+      internal_err InvalidPostprocessingMethod "(Method: $method) for (Input: $INPUT)"
     fi &
     tasks+=$!
   done < $1
 }
 
 __submit_pp() {
-  # Args: handler dest (created filename) [method]
-  LS=0
-  if [[ -z $2 ]]; then
-    err InvalidName "Empty filename"
-    return
-  fi
+  # Args: dest (created filename) [method]
 
-  while read -r dest; do
-    _msg=
-
-    if method=$3 && [[ -n $method ]]; then
-      [[ $dest == *$'\0'* ]] &&
-      err InvalidName "Files cannot contain null characters ($dest)" ||
-      {
-        echo $dest$'\0'$method$'\0'$LINE >&$pp
-        _msg="[PP: $method] invoked for $dest"
-      }
-
-    elif method=${1#*.} && [[ -n ${functions[pp_$method]} ]]; then
-      [[ $dest == *$'\0'* ]] &&
-      err InvalidName "Files cannot contain null characters ($dest)" ||
-      {
-        echo $dest$'\0'$method$'\0'$LINE >&$pp
-        _msg="[PP: $method] invoked for $dest"
-      }
-
+  while IFS= read -r dest; do
+    # End processing and output when there remain no more methods
+    if [[ -z $2 ]]; then
+      [[ -n $dest ]] && echo $dest
     else
-      echo $dest
+      # Continue processing if not marked as skipped
+      if [[ $dest != "# "* && -n $dest ]]; then
+          [[ $dest == *$'\0'* ]] &&
+          err InvalidName "Files cannot contain null characters ($dest)" ||
+          echo $dest$'\0'$2$'\0'$TARGET >&$pp
+      fi
     fi
-    _log_dest $dest $_msg >/dev/null
 
-  done <<< "$2"
+    _log_dest $dest $2
+  done <<< ${1:-$'\n'}
 }
 
 
@@ -725,7 +720,7 @@ __wait_any() {
 
 __output() {
   if [ -t 1 ]; then
-    tee >(${=CLIPcmd})& # important!
+    tee >&$cb
   else
     cat
   fi
@@ -752,7 +747,7 @@ __input() {
 
 __mkpipe() {
   q="$(mktemp -u /tmp/$1.XXX)"
-  mkfifo $q >/dev/null || internal_err "Could not create pipe"
+  mkfifo $q >/dev/null || fatal_err "Could not create pipe"
   echo $q
 }
 
@@ -775,7 +770,7 @@ __lg_get_since() {
 __lg_get_since_failed() {
   local query="
     SELECT DISTINCT target FROM \"$ZSHDL_VARIANT\"
-    WHERE id > $1 AND LS = 1;
+    WHERE id > $1 AND LS > 0;
   "
 
   sqlite3 "$ZSHDL_DB" "$query"
@@ -786,9 +781,9 @@ __lg_filter_skipped() {
   if $ZSHDL_SKIP; then
     lines="$(sqlite3 "$ZSHDL_DB" "SELECT DISTINCT target FROM \"$ZSHDL_VARIANT\" WHERE LS = 0")"
     lines=(${(@f)lines})
-    while read -r line; do
+    while IFS= read -r line; do
       if ((${lines[(Ie)$line]})); then
-        _log_skipped $line
+        TARGET=$line _log_skipped
       else
         echo $line
       fi
@@ -798,14 +793,26 @@ __lg_filter_skipped() {
   fi
 }
 
+__clear_logs() {
+  if [[ ! -f $ZSHDL_DB ]]; then
+    internal_err show_log_entries "Database not found: $ZSHDL_DB"
+    return 1
+  fi
+  printf "This will clear all logs. Are you sure? [y/n]: "
+  read -r ans
+  [[ $ans == [Yy]* ]] && rm -f $ZSHDL_DB &&
+  echo "Logs deleted." || return 1
+}
+
 __begin_lg() {
-  mkdir -p $ZSHDL_STATE_DIR || internal_err Logging "Could not initialize logging directory $ZSHDL_STATE_DIR/.temp"
-  sqlite3 $ZSHDL_DB "CREATE TABLE IF NOT EXISTS \"$ZSHDL_VARIANT\" (id INTEGER PRIMARY KEY, time DATETIME DEFAULT CURRENT_TIMESTAMP, directory TEXT, target TEXT, LS INTEGER, msg TEXT, dest TEXT);"
+  if $ZSHDL_NOLOG; then cat $1 > /dev/null; return; fi
+  mkdir -p $ZSHDL_STATE_DIR || fatal_err Logging "Could not initialize logging directory $ZSHDL_STATE_DIR/.temp"
+  sqlite3 $ZSHDL_DB "CREATE TABLE IF NOT EXISTS \"$ZSHDL_VARIANT\" (id INTEGER PRIMARY KEY, time DATETIME DEFAULT CURRENT_TIMESTAMP, directory TEXT, target TEXT, LS INTEGER, msg TEXT, dest TEXT, input TEXT);"
 
   dbg "sqlite logging database: $ZSHDL_DB"
 
 
-  _fields=(target _msg _dest)
+  _fields=(target _msg _dest input)
 
   while IFS=$'\0' read -r LS $_fields; do
     [[ -z $LS ]] && continue
@@ -816,20 +823,29 @@ __begin_lg() {
     }
 
     if [[ -n $target ]]; then
-      target="'${target//\'/}'"
+      target="'${target//\'/\'\'}'"
     else
       dbg "Logging: Empty target"
       continue
     fi
+
+    if [[ -n $input ]]; then
+      _input="'${input//\'/\'\'}'"
+    else
+      _input=NULL
+    fi
+
     if [[ -n $_msg ]]; then
       msg="'${_msg//\'/}'"
       _msg="'$(sed "s/'//g" <<< $_msg)'"
     else
       _msg=NULL
     fi
+
+    _dest=${_dest#"# "}
     if [[ -n $_dest ]]; then
       if [[ $PWD == *\'* || $_dest ==  *\'* ]]; then
-        err Logging "Destination or Directory contains invalid characters, skipping log." &&
+        err Logging "Destination or Directory contains invalid characters, skipping log."
         continue
       fi
 
@@ -842,7 +858,7 @@ __begin_lg() {
 
     dbginfo target LS _directory _msg _dest
 
-    sql_query="INSERT INTO \"$ZSHDL_VARIANT\" (target, LS, directory, msg, dest) VALUES ($target, $LS, $_directory, $_msg, $_dest);"
+    sql_query="INSERT INTO \"$ZSHDL_VARIANT\" (target, LS, directory, msg, dest, input) VALUES ($target, $LS, $_directory, $_msg, $_dest, $_input);"
 
     sqlite3 "$ZSHDL_DB" $sql_query
   done < $1
@@ -851,43 +867,51 @@ __begin_lg() {
 }
 
 _log_msg() {
-  [[ -z $LS || -z $LINE || -z $1 ]] && return 1
+  [[ -z $LS || -z $TARGET || -z $1 ]] && return 1
 
   msg=${${1%%$'\n'##}//$'\n'/' \\\\ '}
-    # print -u2 "Error: missing one of LS: $LS, LINE: $LINE, MSG: $1" ||
-  print -r -- $LS$'\0'$LINE$'\0'$1$'\0' >&$lg
+    # print -u2 "Error: missing one of LS: $LS, LINE: $TARGET, MSG: $1" ||
+  print -r -- $LS$'\0'$TARGET$'\0'$1$'\0'"# "$'\0'$INPUT >&$lg
 }
 
 _log_skipped() {
-  # $1 = target, $2 = dest
-  ((VERBOSE)) && print -u2 -- "[Skipped] ${2:-$1}"
-  print -r -- -2$'\0'$1'\0'"[Skipped]"'\0'$2 >&$lg
+  # args: dest method
+  $ZSHDL_EXPLICITSKIP && [[ -z $1 ]] && return
+  ((VERBOSE)) && print -u2 -- "[Skipped] ${1:-${INPUT:-${TARGET}}}"
+
+  if [[ -n $2 ]]; then
+    method="-> $2"
+  else
+    method=
+  fi
+
+  print -r -- -2$'\0'$TARGET$'\0'$method$'\0'"${1:-"# "}"$'\0'$INPUT >&$lg # second last field cannot be empty
 }
 
 _log_dest() {
-  local dest
-  if [[ $1 == '# '* ]]; then
-    local entry=${1#'# '}
-    if [[ -e $entry ]]; then
-      dest=${entry/#$HOME/~}
-      _log_skipped $LINE $dest
-    else
-      err Nonexistant $entry
-    fi
-    return 5
+  # args: dest method (can be empty)
+  # outputs: none
+  if [[ -z $1 || $1 == '# '* ]]; then
+    _log_skipped $@
+    return
   fi
 
-  if [[ -e $1 ]]; then
-    dest=${1/#$HOME/~}
-    if [[ -z $LS ]] || (( LS == 3 || LS == 2 )); then
-      print -u2 -- "[Processed] $dest"
-    else
-      print -u2 -- "[Downloaded] $dest"
-    fi
-    print -r --  $LS$'\0'$LINE$'\0'$2$'\0'$dest >&$lg
+  dest=${1/#$HOME/~}
+  if [[ -z $INPUT ]]; then
+    print -u2 -- "[Downloaded] $dest"
   else
-    err Nonexistant $1
+    print -u2 -- "[Processed] $dest"
   fi
+
+  if [[ -n $2 ]]; then
+    LS=-1
+    method="-> $2"
+  else
+    method=
+    LS=0
+  fi
+
+  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'"$dest"$'\0'$INPUT >&$lg
 }
 
 __finish_lg() {
@@ -929,12 +953,14 @@ __read_config() {
     export ${proto}_HANDLERS=""
   done
 
-  while IFS='=' read -r key val; do
+  _CONSTANTS=${(j.|.)CONSTANTS}
+
+  while IFS='=' read -r key val || [[ -n $key ]]; do
     [[ ${key%%\#*} == ([[:space:]]##|) ]] && continue
     [[ -z $val ]] && warn EmptyKeyFound $key && continue
     case $key in
-      ZSHDL_CONNECT_TIMEOUT|ZSHDL_THREADS|ZSHDL_PP_THREADS|VERBOSE|ZSHDL_FORCE_PROTO|ZSHDL_OUTPUT_DIR|ZSHDL_LOG_DISPLAY_LIMIT)
-        : ${(P)key:=$val}
+      ${~_CONSTANTS})
+        : ${(P)key::=$val}
         ;;
       http(|s).*)
         # postprocessor decoration found
@@ -997,14 +1023,21 @@ __edit_config() {
   done
   print -n "Enter a number to edit: "
   read -r i
-  [[ -n $files[i] ]] || fatal_err InvalidSelection
 
-  if [[ $files[i] == "Clear Database" ]]; then
-    rm $ZSHDL_DB || internal_err "Could not delete database"
+
+
+  if [[ $i == 1 ]]; then
+    rm $ZSHDL_DB || fatal_err "Could not delete database"
     exit
+  elif [[ $i == 2 ]]; then
+    file=$CONFIG
+  else
+    file=${ZSHDL_CONFIG_FILES[$((i-2))]}
   fi
 
-  ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $files[i]
+  [[ -n $file ]] || fatal_err InvalidSelection
+
+  ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $file
   __check_config
   exit $?
 }
@@ -1022,7 +1055,7 @@ __display_api() {
 
   echo "\n### API ###\n"
 
-  api=(get_dest failure_or_show success_or_log)
+  api=(read_dest failure_or_show success_or_log)
   for f in $api; do
     functions $f
   done
@@ -1091,23 +1124,29 @@ if ! have pere; then
     local file=${@[$#]}
     while  [[ -z $file || -e $file ]]; do
       print -n -u2 "$file exists! Please choose a different name: "
-      read -r file </dev/tty
+      read -r file </dev/tty || return 1
     done
     
-    echo $file
+    case $1 in
+      -d)    echo $file;;
+      -m)    shift 1; mv $@;;
+      -c)    shift 1; mv -r $@;;
+    esac
   }
 fi
 
 unset -f exportCmdVar
 
-CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP)
+CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_EXPLICITSKIP ZSHDL_STRIPWHITESPACE)
 
 : ${ZSHDL_CONNECT_TIMEOUT:=5}
 : ${ZSHDL_THREADS:=5}
 : ${ZSHDL_PP_THREADS:=5}
 [[ $VERBOSE == [0-9] ]] || VERBOSE=1
 [[ $ZSHDL_SKIP == (true|false) ]] || ZSHDL_SKIP=false
-
+[[ $ZSHDL_EXPLICITSKIP == (true|false) ]] || ZSHDL_EXPLICITSKIP=true
+[[ $ZSHDL_NOLOG == (true|false) ]] || ZSHDL_NOLOG=false
+[[ $ZSHDL_STRIPWHITESPACE == (true|false) ]] || ZSHDL_STRIPWHITESPACE=false
 : ${ZSHDL_FORCE_PROTO}
 : ${ZSHDL_OUTPUT_DIR:=./}
 : ${ZSHDL_LOG_DISPLAY_LIMIT:=50}
@@ -1135,6 +1174,7 @@ Options:
   -s                : Skip inputs which succeded in the past. ( ZSHDL_SKIP=true|false )
   -v                : Set verbosity 2
   --verbose [level] : Set verbosity level
+  --clear [glob]    : Clear logs
 
 Environment variables and configuration:
   See $PROG -v -h
@@ -1156,13 +1196,12 @@ Examples:
     Process a list of URLs in a file (media.ini):
 
 Status codes:
-  -2: Unprocessed/Unhandled
-  -1: Handling
-   0: HandlerSuccess
-   1: HandlerError
-   2: PPError
-   3: PPSuccess
-   4: InternalError
+
+   …: Misc/Processing
+  -2: Unhandled/Skipped
+  -1: Partial Success
+   0: Success
+  >0: Handling error
 EOF
   
   (($#)) && exit $1
@@ -1176,6 +1215,10 @@ RETRY=1
 SCRIPT="$(readlink -f -- "$0")"
 PROG="$(basename "$0")"
 ZSHDL_VARIANT=default
+
+TARGET=
+INPUT=
+CLEAR_LOGS=
 
 new_args=()
 _posargs=false
@@ -1196,6 +1239,10 @@ while [[ $# -gt 0 ]]; do
         continue
       fi
       ;|
+    --clear)
+      __clear_logs
+      exit
+      ;;
     --verbose)
       if ! $_posargs; then
         if [[ "$2" =~ ^[0-9]$ ]]; then
@@ -1264,21 +1311,27 @@ fi
 $EDIT && __edit_config $CONFIG
 
 # Begin
-LG=$(__mkpipe dl_lg)
+LG="$(__mkpipe dl_lg)"
 __begin_lg $LG &
 LG_ID=$!
 exec {lg}> $LG
 
+CB="$(__mkpipe dl_cb)"
+${=CLIPcmd} < $CB &
+CB_ID=$!
+exec {cb}> $CB
 
-PP=$(__mkpipe dl_pp)
-__begin_pp $PP | __output &
+PP="$(__mkpipe dl_pp)"
+{ __begin_pp $PP | __output; } &
 PP_ID=$!
 exec {pp}> $PP
 
 trap "rm $PP $LG" EXIT 
 
 tasks=()
-__input $@ | while read -r line; do
+
+
+__input $@ | while { $ZSHDL_STRIPWHITESPACE && IFS=; read -r line;} ; do
   (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
   { handle $line </dev/tty | __output; } &
   tasks+=$!
@@ -1286,7 +1339,7 @@ done
 
 exec {pp}>&-
 exec {lg}>&-
-
+exec {cb}>&-
 
 wait $PP_ID
 # wait $LG_ID

@@ -1,32 +1,41 @@
 #!/usr/bin/env zsh
 
-: ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl/}
-: ${ZSHDL_INSTALL_DIR:=$HOME/.local/bin}
+set -e
 
-[[ :$PATH: == *:$ZSHDL_INSTALL_DIR:* ]] || $ZSHDL_INSTALL_DIR=/usr/bin
+: ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl/}
+
+if [[ -z $ZSHDL_INSTALL_DIR ]]; then
+	[[ :$PATH: == *:$HOME/.local/bin:* ]] &&
+		ZSHDL_INSTALL_DIR=$HOME/.local/bin ||
+		ZSHDL_INSTALL_DIR=/usr/bin
+fi
 
 : ${ZSHDL_CONFIG_DIR:=$HOME/.config/zsh-dl}
 
+SCRIPT="$(readlink -f -- "$0")"
+cd $SCRIPT:h || exit 1
+mkdir -p $ZSHDL_CONFIG_DIR
+
 have() {
-  (( $+commands[${1%% *}] ))
+	(( $+commands[${1%% *}] ))
 }
 
 if have pere; then
-  cmd=(pere -c)
+	cmd=(pere -c)
 else
-  cmd=(cp -ar)
+	cmd=(cp -ar)
 fi
 
 for f in config/*; do
-  $cmd $f $ZSHDL_CONFIG_DIR/ >/dev/null
+	$cmd $f $ZSHDL_CONFIG_DIR/ >/dev/null
 done
 
 print -n -- "What name should zsh-dl be installed to?: (dl)"
 read -r name
 : ${name:=dl}
 
-chmod +x $ZSHDL_INSTALL_DIR/$name
+chmod +x zsh-dl
 $cmd zsh-dl $ZSHDL_INSTALL_DIR/$name >/dev/null
 
-echo "Installation complete!" 
+echo "Installation complete!"
 echo "Try $name https://github.com/Squirreljetpack/ZSHDL/tree/zsh-dl, to download a github folder to your current directory, or $name https://gutenberg.org/ebooks/18328 to download a book as markdown! (JohannesKaufmann/html-to-markdown is required)"
