@@ -2,31 +2,19 @@
 
 setopt extended_glob
 setopt local_options
+autoload -Uz colors && colors
+
 
 ### HANDLERS
-handle_pretransform() {
-  proto=${1%%://*}
-  stem=${1#*://}
-  if [[ -n $ZSHDL_FORCE_PROTO ]]; then
-    proto=$ZSHDL_FORCE_PROTO
-  elif [[ $proto == $stem ]]; then
-    proto=
-  fi
-  echo $proto
-  echo $stem
-}
 
 # entrypoint
 handle() {
   export LS=-3
   export TARGET=$1
   [[ -n $TARGET ]] || return
-  handle_pretransform $1 | {
-    read -r proto
-    read -r stem
-  }
 
-  ((VERBOSE>1)) && info proto
+  _read_proto_stem $1
+  dbginfo proto
 
   handle=handle_$proto
   if is_function $handle; then
@@ -36,24 +24,15 @@ handle() {
   fi
 }
 
-
 handle_http() {
-  url=$1
-  if [[ $url == *"?"* ]]; then
-    params=${url#*"?"}
-    url=${url%%"?"*}
-  fi
-  shift 1
-
+  _read_url_params $1
   info url
   [[ -n $params ]] && info params
-
 
   while IFS='=' read -r _handler pattern; do
     patterns=(${(s.:.)pattern})
     if [[ $url == $~patterns[1] ]] && 
     [[ (($#patterns < 2)) || $params == $~patterns[2] ]]; then
-      LS=-3
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -74,19 +53,13 @@ handle_https() {
 }
 
 handle_ssh() {
-  target=$1
-  subpath=${${1#*:}%.git}
-  userhost=${1%%:*}
-  shift 1
-
-  info target userhost subpath
+  _read_userhost_subpath $1
+  info userhost subpath
 
   while IFS='=' read -r _handler pattern; do
     patterns=(${(s.:.)pattern})
-    if [[ $target == $~patterns[1] ]] && 
-    [[ (($#patterns < 2)) || $userhost == $~patterns[2] ]] &&
-    [[ (($#patterns < 3)) || $subpath == $~patterns[3] ]]; then
-      LS=-3
+    if [[ $userhost == $~patterns[1] ]] &&
+    [[ (($#patterns < 2)) || $subpath == $~patterns[2] ]]; then
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -107,19 +80,7 @@ handle_sftp() {
 }
 
 handle_file() {
-  target=$1
-
-  if [[ ! -e $target && ! -L $target ]]; then
-     internal_err "Nonexistant" $target
-     return 1
-  fi
-
-	type=$(get_file_type $target)
-  res="$(file -b --mime $target)"
-	mime=${res%%\; *}
-	encoding=${res#*\; }
-  shift 1
-
+  _read_target_type_mime_encoding $1
   info target type mime encoding
 	
   while IFS='=' read -r _handler pattern; do
@@ -128,7 +89,6 @@ handle_file() {
     [[ (($#patterns < 2)) || $type == $~patterns[2] ]] &&
     [[ (($#patterns < 3)) || $mime == $~patterns[3] ]] &&
     [[ (($#patterns < 4)) || $encoding == $~patterns[4] ]]; then
-      LS=-3
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -145,8 +105,7 @@ handle_file() {
 }
 
 handle_na() {
-  target=$1
-  shift 1
+  _read_target $1
 
   if [[ -e $target ]]; then
     handle_file $target
@@ -157,7 +116,6 @@ handle_na() {
   else
     while IFS='=' read -r _handler pattern; do
       if [[ $target == $~pattern ]]; then
-        [[ $_handler != na.default ]] && LS=-3
         handler=${_handler%(\||:)*}
         _method=${_handler#$handler}
         seperator=${_method:0:1}
@@ -176,8 +134,8 @@ handle_na() {
 
 # empty proto_handler for user to use if they want to force some handler methods
 handle_misc() {
-  target=$1
-  shift 1
+  _read_target $1
+  info target
 
   while IFS='=' read -r _handler pattern; do
     if [[ $target == $~pattern ]]; then
@@ -197,9 +155,62 @@ handle_misc() {
   internal_err
 }
 
+### PRETRANSFORMS
+
+__read_proto_stem() {
+  proto=${1%%://*}
+  stem=${1#*://}
+  if [[ -n $ZSHDL_FORCE_PROTO ]]; then
+    proto=$ZSHDL_FORCE_PROTO
+  elif [[ $proto == $stem ]]; then
+    proto=
+  fi
+  echo $proto
+  echo $stem
+}
+
+__read_url_params() {
+  url=$1
+  if [[ $url == *"?"* ]]; then
+    params=${url#*"?"}
+    url=${url%%"?"*}
+  fi
+}
+
+__read_userhost_subpath() {
+  subpath=${${1#*:}%.git}
+  userhost=${1%%:*}
+}
+
+__read_target_type_mime_encoding() {
+  target=$1
+
+  if [[ ! -e $target && ! -L $target ]]; then
+     internal_err "Nonexistant" $target
+     return 1
+  fi
+
+	type=$(get_file_type $target)
+  res="$(file -b --mime $target)"
+	mime=${res%%\; *}
+	encoding=${res#*\; }
+}
+
+__read_target() {
+  target=$1
+}
+
+# For overriding
+_read_url_params() { _${funcstack[1]} $@; }
+_read_proto_stem() { _${funcstack[1]} $@; }
+_read_userhost_subpath()  { _${funcstack[1]} $@; }
+_read_target_type_mime_encoding() { _${funcstack[1]} $@; }
+_read_target() { _${funcstack[1]} $@; }
+
+
 #### API
 
-# Note on naming: Overrideable functions are named normally, "public" helper functions intended to be called are prefixed with an underscore, and __functions are internal.
+# Note on naming: "API" functions available for use in config code are named normally, functions which are lower level or for overriding are prefixed with a _, __functions are internal, 
 
 ## Handler Defaults
 http.default() {
@@ -245,7 +256,8 @@ file.default() {
 }
 
 na.default() {
-  warn Unhandled "\"$1\""
+  [[ -z $1 ]] && return 1
+  ((VERBOSE > 1)) && warn Unhandled "\"$1\""
   _log_skipped
   return 1
 }
@@ -348,49 +360,44 @@ get_real() {
 }
 
 ## Utils
-
 internal_err() {
-  print -u2 "[InternalError]" "${(j. .)@}"
+  print -u2 "${fg_bold[red]}[InternalError]${reset_color} ${(j. .)@}"
   return 1
 }
 
 fatal_err() {
-  print -u2 "[FatalError]" "${(j. .)@}"
+  print -u2 "${fg_bold[red]}[FatalError]${reset_color} ${(j. .)@}"
   exit 1
 }
 
 err() {
-  # todo make error red
-  print -u2 -- "[ERROR: $1] $2"
+  print -u2 -- "${fg[red]}[ERROR: $1]${reset_color} $2"
   [[ -n $TARGET ]] && _log_msg "[ERROR: $1] $2"
   return 1
 }
 
 warn() {
-  # make orange
   ((VERBOSE)) || return
-  print -u2 -- "[WARN: $1] $2"
+  print -u2 -- "${fg[yellow]}[WARN: $1]${reset_color} $2"
 }
 
 info() {
   ((VERBOSE)) || return
-  # make info blue
   while (($#)); do
-    print -u2 -- "[INFO: $1] ${(P)1}"
+    print -u2 -- "${fg[blue]}[INFO: $1]${reset_color} ${(P)1}"
     [[ -n $TARGET ]] && ((VERBOSE>1)) && _log_msg "[INFO: $1] ${(P)1}"
     shift 1
   done
 }
 
 dbg() {
-  ((VERBOSE>1)) && print -u2 -- "[DEBUG] $1"
+  ((VERBOSE > 1)) && print -u2 -- "${fg[blue]}[DEBUG]${reset_color} $1"
 }
 
 dbginfo() {
-  ((VERBOSE>1)) || return
-  # make info blue
+  ((VERBOSE > 1)) || return
   while (($#)); do
-    print -u2 -- "[INFO: $1] ${(P)1}"
+    print -u2 -- "${fg[blue]}[INFO: $1]${reset_color} ${(P)1}"
     shift 1
   done
 }
@@ -408,7 +415,7 @@ success_or_log() {
   result="$($@ 2> >(tee /dev/fd/2))"
   code=$?
   if ((code)); then
-    LS=$code TAG=${TAG:-$1} _log_msg $result # TAG not implemented
+    LS=$code TAG=${TAG:-$1} _log_msg $result
     return $code
   fi
 }
@@ -442,7 +449,6 @@ __get_visible_length() {
   print -n ${#str_no_ansi}
 }
 
-# Centers text within a given width
 __center_text() {
   local text=$1
   local width=$2
@@ -474,16 +480,14 @@ __truncate_left() {
 }
 
 
-
-RESET_COLOR=$'\033[0m'
 _get_LS_color() {
   case $1 in
     -2) print -n '\033[90m' ;;      # Muted Grey (for Skipped)
-    -1) print -n   '\033[34m' ;;      # Blue (for partial success)
-    0) print -n '\033[32m' ;;      # Green (for total success)
-    -*) print -n '\033[37m' ;;      # White (for misc?)
-    *) print -n '\033[31m' ;;    # Bright Red (for Errors)
-    # 2) print -n '\033[38;5;203m' ;; # Salmon
+    -1) print -n  "${fg[blue]}" ;;      # Blue (for partial success)
+    0) print -n "${fg[green]}" ;;      # Green (for total success)
+    -*) print -n "${fg[white]}" ;;      # White (for misc)
+    2) print -n '\033[38;5;203m' ;; # Salmon
+    *) print -n "${fg[red]}" ;;    # Bright Red (for Errors)
   esac
 }
 __show_log_entries() {
@@ -501,7 +505,14 @@ __show_log_entries() {
 
   local log_id log_ls log_target log_msg log_dir log_time
 
-  base_select="SELECT id, strftime('%m-%d %H:%M:%S', time, 'localtime'), target, COALESCE(msg, ' '), COALESCE(dest, ' '), COALESCE(directory, ' '), LS FROM \"$ZSHDL_VARIANT\""
+  base_select="SELECT id,
+    strftime('%m-%d %H:%M:%S', time, 'localtime'),
+    target, COALESCE(msg, ' '),
+    COALESCE(dest, ' '),
+    COALESCE(directory, ' '),
+    LS
+    FROM \"$ZSHDL_VARIANT\"
+    $LOG_FILTER"
   query=""
 
   if [[ "$1" =~ ^([0-9]+):$ ]]; then
@@ -520,7 +531,7 @@ __show_log_entries() {
   while IFS=$'\t' read -r log_id log_time log_target log_msg log_dest log_dir log_ls; do
     $first_entry && print && first_entry=false
     local header_pre="Task $log_id:   status code "
-    local header_text="$header_pre$(_get_LS_color $log_ls)$log_ls$RESET_COLOR"
+    local header_text="$header_pre$(_get_LS_color $log_ls)$log_ls${reset_color}"
     local header_text_nocolor="$header_pre$log_ls"
     local width=${#header_text_nocolor}
 
@@ -558,12 +569,19 @@ __show_log() {
     internal_err show_log "Database not found: $ZSHDL_DB"
     return 1
   fi
+
   local data
-  data=$(sqlite3 "$ZSHDL_DB" -separator $'\t' \
-    "SELECT id, strftime('%m-%d %H:%M:%S', time, 'localtime'), target, COALESCE(msg, ' '), COALESCE(dest, ' '), LS
+  data="$(sqlite3 "$ZSHDL_DB" -separator $'\t' \
+    "SELECT id,
+            strftime('%m-%d %H:%M:%S', time, 'localtime'),
+            COALESCE(input, target),
+            COALESCE(msg, ' '),
+            COALESCE(dest, ' '),
+            LS
      FROM \"$ZSHDL_VARIANT\"
+     $LOG_FILTER
      ORDER BY id DESC
-     LIMIT $ZSHDL_LOG_DISPLAY_LIMIT")
+     LIMIT $ZSHDL_LOG_DISPLAY_LIMIT")"
 
   if [[ -z $data ]]; then
     warn show_log "No log entries found"
@@ -590,7 +608,7 @@ __show_log() {
     w2 = 14; printf "%d ", w2;                      # Time
     w3 = (max[3]<10)?10:max[3]; w3 = (w3>40)?40:w3; printf "%d ", w3; # Target
     w4 = (max[4]<10)?10:max[4]; w4 = (w4>40)?40:w4; printf "%d ", w4; # Message
-    w5 = (max[5]<20)?20:max[5]; w5 = (w5>60)?60:w5; printf "%d ", w5; # Destination
+    w5 = (max[5]<20)?20:max[5]; w5 = (w5>40)?40:w5; printf "%d ", w5; # Destination
     w6 = 2; printf "%d ", w6;                        
   }' <<< "$all_data"))
 
@@ -646,7 +664,7 @@ __show_log() {
       "$target_str" \
       "$msg_str" \
       "$dest_str" \
-      "$color" "$ls_str" "$RESET_COLOR"
+      "$color" "$ls_str" "${reset_color}"
   done <<< "$data"
 
   print "$bot_border"
@@ -701,8 +719,6 @@ __submit_pp() {
     _log_dest $dest $2
   done <<< ${1:-$'\n'}
 }
-
-
 
 ### BEGIN LOGIC
 
@@ -867,17 +883,16 @@ __begin_lg() {
 }
 
 _log_msg() {
-  [[ -z $LS || -z $TARGET || -z $1 ]] && return 1
+  [[ -z $LS || -z $TARGET || -z $1 ]] && return 1 # only run outside of thread
 
   msg=${${1%%$'\n'##}//$'\n'/' \\\\ '}
-    # print -u2 "Error: missing one of LS: $LS, LINE: $TARGET, MSG: $1" ||
   print -r -- $LS$'\0'$TARGET$'\0'$1$'\0'"# "$'\0'$INPUT >&$lg
 }
 
 _log_skipped() {
   # args: dest method
   $ZSHDL_EXPLICITSKIP && [[ -z $1 ]] && return
-  ((VERBOSE)) && print -u2 -- "[Skipped] ${1:-${INPUT:-${TARGET}}}"
+  ((VERBOSE)) && print -u2 -- "\033[90m[Skipped]${reset_color} ${1:-${INPUT:-${TARGET}}}"
 
   if [[ -n $2 ]]; then
     method="-> $2"
@@ -898,9 +913,9 @@ _log_dest() {
 
   dest=${1/#$HOME/~}
   if [[ -z $INPUT ]]; then
-    print -u2 -- "[Downloaded] $dest"
+  print -u2 -- "${fg[green]}[Downloaded]${reset_color} $dest"
   else
-    print -u2 -- "[Processed] $dest"
+  print -u2 -- "${fg[green]}[Processed]${reset_color} $dest"
   fi
 
   if [[ -n $2 ]]; then
@@ -1130,7 +1145,7 @@ if ! have pere; then
     case $1 in
       -d)    echo $file;;
       -m)    shift 1; mv $@;;
-      -c)    shift 1; mv -r $@;;
+      -c)    shift 1; cp -r $@;;
     esac
   }
 fi
@@ -1154,6 +1169,7 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 : ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
 ZSHDL_DB=$ZSHDL_STATE_DIR/log.db
 : ${ZSHDL_CONFIG_DIR:=$HOME/.config/zsh-dl}
+
 ### ARGPARSE
 
 usage() {
@@ -1219,6 +1235,7 @@ ZSHDL_VARIANT=default
 TARGET=
 INPUT=
 CLEAR_LOGS=
+LOG_FILTER=
 
 new_args=()
 _posargs=false
@@ -1243,6 +1260,18 @@ while [[ $# -gt 0 ]]; do
       __clear_logs
       exit
       ;;
+    --filter)
+      if ! $_posargs; then
+        if [[ "$2" =~ ^[0-9,]+$ ]]; then
+          LOG_FILTER="WHERE LS IN ($2)"
+          shift
+        else
+          err ParseError "Invalid log filter"
+        fi
+        shift
+        continue
+      fi
+      ;|
     --verbose)
       if ! $_posargs; then
         if [[ "$2" =~ ^[0-9]$ ]]; then
