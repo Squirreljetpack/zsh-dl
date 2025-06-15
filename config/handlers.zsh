@@ -24,6 +24,12 @@ http.gutenberg() {
 	http.default $url # downloads the url and outputs the destination filename
 }
 
+# example of customizing the input. This is safe because urls don't have spaces.
+_read_url_params() {
+  __read_url_params $@;
+  url=${url%%" | "*}
+}
+
 _http.dl() {
   $YTDLPcmd \
 	  -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
@@ -71,7 +77,7 @@ http.git() {
     else
       _ARGS=""
     fi
-    _ARGS=$_ARGS ssh.clone git@$root $user_repo.git
+    _ARGS=$_ARGS ssh.clone git@$root ${user_repo%.git}.git
     return
   fi
 
@@ -124,7 +130,7 @@ ssh.clone() {
 file.walk() {
   if [[ -d $1 ]]; then
     for f in *; do
-      file_walk $f
+      file.walk $f
     done
   else
     handle_file $f
