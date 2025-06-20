@@ -30,9 +30,9 @@ handle_http() {
   [[ -n $params ]] && info params
 
   while IFS='=' read -r _handler pattern; do
-    patterns=(${(s.:.)pattern})
-    if [[ $url == $~patterns[1] ]] && 
-    [[ (($#patterns < 2)) || $params == $~patterns[2] ]]; then
+    patterns=("${(s.:.)pattern}")
+    if [[ $url == ${~patterns[1]:-*} &&
+          $params == ${~patterns[2]:-*} ]]; then
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -57,9 +57,9 @@ handle_ssh() {
   info userhost subpath
 
   while IFS='=' read -r _handler pattern; do
-    patterns=(${(s.:.)pattern})
-    if [[ $userhost == $~patterns[1] ]] &&
-    [[ (($#patterns < 2)) || $subpath == $~patterns[2] ]]; then
+    patterns=("${(s.:.)pattern}")
+    if [[ $userhost == ${~patterns[1]:-*} &&
+          $subpath == ${~patterns[2]:-*} ]]; then
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -84,11 +84,11 @@ handle_file() {
   info target type mime encoding
 	
   while IFS='=' read -r _handler pattern; do
-	  patterns=(${(s.:.)pattern})
-    if [[ $target == $~patterns[1] ]] && 
-    [[ (($#patterns < 2)) || $type == $~patterns[2] ]] &&
-    [[ (($#patterns < 3)) || $mime == $~patterns[3] ]] &&
-    [[ (($#patterns < 4)) || $encoding == $~patterns[4] ]]; then
+	  patterns=("${(s.:.)pattern}")
+    if [[ $target == ${~patterns[1]:-*} &&
+          $type == ${~patterns[2]:-*} &&
+          $mime == ${~patterns[3]:-*} &&
+          $encoding == ${~patterns[4]:-*} ]]; then
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -178,7 +178,7 @@ __read_url_params() {
 }
 
 __read_userhost_subpath() {
-  subpath=${${1#*:}%.git}
+  subpath=${1#*:}
   userhost=${1%%:*}
 }
 
@@ -290,7 +290,7 @@ read_dest() {
   case $proto in
     http(|s))
       _dest=${${1%/\#[^\#/]##}:t} # strip #id
-      [[ -z $dest:e ]] && _dest+=.html
+      [[ -z $_dest:e ]] && _dest+=.html
       ;;
     ssh)
       subpath=${1%.git}
@@ -913,7 +913,7 @@ _log_dest() {
 
   dest=${1/#$HOME/~}
   if [[ -z $INPUT ]]; then
-  print -u2 -- "${fg[green]}[Downloaded]${reset_color} $dest"
+  print -u2 -- "${fg[green]}[Completed]${reset_color} $dest"
   else
   print -u2 -- "${fg[green]}[Processed]${reset_color} $dest"
   fi
@@ -945,8 +945,8 @@ __read_config() {
   [[ ! -d $ZSHDL_CONFIG_DIR ]] && fatal_err "Configuration directory not found (ZSHDL_CONFIG_DIR @ '$ZSHDL_CONFIG_DIR'). Please check your installation."
 
   if [[ -z $CONFIG ]]; then
-    [[ -e $ZSHDL_CONFIG_DIR/default.ini ]] &&
-    CONFIG=$ZSHDL_CONFIG_DIR/default.ini ||
+    [[ -e $ZSHDL_CONFIG_DIR/DEFAULT.ini ]] &&
+    CONFIG=$ZSHDL_CONFIG_DIR/DEFAULT.ini ||
     fatal_err "No config found."
   elif (($#CONFIG > 1)); then
     fatal_err "Multiple configs $CONFIG[*] matched."
@@ -1155,7 +1155,7 @@ unset -f exportCmdVar
 CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_EXPLICITSKIP ZSHDL_STRIPWHITESPACE)
 
 : ${ZSHDL_CONNECT_TIMEOUT:=5}
-: ${ZSHDL_THREADS:=5}
+: ${ZSHDL_THREADS:=1}
 : ${ZSHDL_PP_THREADS:=5}
 [[ $VERBOSE == [0-9] ]] || VERBOSE=1
 [[ $ZSHDL_SKIP == (true|false) ]] || ZSHDL_SKIP=false
@@ -1187,10 +1187,10 @@ Options:
   -l                : Show the log.
                         Providing a list of …log_ids or [n]: for the last n logs will display full execution details.
   --from [log_id=0] : Retry failed downloads.
-  -s                : Skip inputs which succeded in the past. ( ZSHDL_SKIP=true|false )
-  -v                : Set verbosity 2
-  --verbose [level] : Set verbosity level
-  --clear [glob]    : Clear logs
+  -s                : Skip inputs which succeded in the past.
+  -v                : Set verbosity 2.
+  --verbose [level] : Set verbosity level.
+  --clear [glob]    : Clear logs.
 
 Environment variables and configuration:
   See $PROG -v -h
@@ -1230,7 +1230,7 @@ RETRY_FROM=0
 RETRY=1
 SCRIPT="$(readlink -f -- "$0")"
 PROG="$(basename "$0")"
-ZSHDL_VARIANT=default
+ZSHDL_VARIANT=DEFAULT
 
 TARGET=
 INPUT=
