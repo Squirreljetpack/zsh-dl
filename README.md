@@ -13,7 +13,7 @@ dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
 
 [^1]: External dependencies are required.
 
-https://github.com/user-attachments/assets/58ff52a5-f794-4466-a702-05071a963389
+https://github.com/user-attachments/assets/55a36923-0bad-48fe-bc76-a382834af399
 
 
 ## Key Features
@@ -38,7 +38,7 @@ https://github.com/user-attachments/assets/58ff52a5-f794-4466-a702-05071a963389
 
 - Reads from your clipboard for minimal fuss
 
-- Uses [pere](https://github.com/Squirreljetpack/pere) if installed for hassle-free destination determination
+- Uses [lt](https://github.com/Squirreljetpack/lt) if installed for hassle-free destination determination
 
 ### ⚙ Dead Simple Configuration
 
@@ -122,6 +122,7 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 
 - Retry failed downloads
 
+
 ```shell
 > dl -s
 ┌────┬────────────────┬──────────────────────────────────────────┬──────────────────────────────────────────┬──────────────────────────────┬──────┐
@@ -133,6 +134,13 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 └────┴────────────────┴──────────────────────────────────────────┴──────────────────────────────────────────┴──────────────────────────────┴──────┘
 
 ```
+
+### 📋 Task management
+
+- Queue your input, cancel anytime, and resume where you left off
+
+- More on the way
+
 
 # Installation
 
@@ -148,7 +156,7 @@ The installer will prompt you for what to name the executable as. The default is
 
 zsh-dl relies on the following external command-line tools. Certain functionality will be disabled without them:
 
-- [pere](https://github.com/Squirreljetpack/pere): For determining download destination.
+- [lt](https://github.com/Squirreljetpack/lt): For determining download destination.
 - [sqlite3](https://www.sqlite.org/download.html): For logging.
 - clipboard commands (xclip/pbcopy[^3]): For reading from clipboard.
 [^3]: preinstalled on Mac

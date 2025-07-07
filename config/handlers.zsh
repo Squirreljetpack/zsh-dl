@@ -24,18 +24,22 @@ http.gutenberg() {
 	http.default $url # downloads the url and outputs the destination filename
 }
 
-# example of customizing the input. This is safe because urls don't have spaces.
+# example of modifying the input arguments for http handlers. (This is safe as is because urls don't have spaces).
 _read_url_params() {
   __read_url_params $@;
   url=${url%%" | "*}
 }
 
 http.ytdlp() {
-  failure_or_show $YTDLPcmd \
-	  -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
-	  --abort-on-unavailable-fragments \
-	  --print after_move:filepath \
-	  $@
+  # yt-dlp can exit 1 even on successful download so we just rely on the output
+  output=$(
+    $YTDLPcmd \
+      -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
+      --abort-on-unavailable-fragments \
+      --print after_move:filepath \
+      $@
+  )
+  [[ -e $output ]] && echo $output
 }
 
 http.images_dl() {
@@ -102,7 +106,7 @@ http.git() {
   # strip components=1: maps root/ -> .
   if curl -sL "$archive_url" | success_or_log tar -xzf - --directory "$temp_dir" --strip-components=1 "${archive_root}/${subdir}"; then
     read_dest file $temp_dir/${subdir} || return 0
-    pere -m $temp_dir/${subdir} $dest >/dev/null
+    lt -m $temp_dir/${subdir} $dest >/dev/null
     rm -r $temp_dir
     echo $dest:t
   fi
