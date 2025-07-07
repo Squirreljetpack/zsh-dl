@@ -108,7 +108,7 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 # format all your files with default settings
 ```
 
-[^2]: ok yes it does feel kinda useless considering that its not much harder to just call curl or rsync. But the github download is useful imo, reduced cognitive load is always nice, and maybe the other parts might be of use to someone else. Also, have I mentioned its dead simple?
+[^2]: ok yes it does feel kinda useless considering that its not much harder to just call curl or rsync. But github download is pretty nice, and even if its an overengineered alias, its still pretty handy to use. Feel free to give it a try! Also, there is a purpose in all of it, even if it'll probably take a rewrite in Rust :p.
 
 See [Configuration](#handlers-and-preprocessors) for the actual inputs provided to and outputs expected of these handlers.
 
@@ -142,7 +142,7 @@ cd zsh-dl
 ./install.zsh
 ```
 
-The installer will prompt you for what to name the executable as. The default is dl but you may want to choose a more explicit name and create a shell alias instead.
+The installer will prompt you for what to name the executable as. The default is dl but you may want to choose a longer name and create a shell alias instead.
 
 ### Dependencies
 
@@ -238,7 +238,7 @@ See `dl -v --help`
     - `FORMATPYTHONcmd`
     - `HTML2MARKDOWNcmd`
     - `YTDLPcmd`
-    - `GALLERYDLcmd`
+    - `IMAGESDLcmd`
 
 
 </br>
@@ -257,6 +257,10 @@ See `dl -v --help`
 - Even more generalized composition
 - Draw a diagram
 - Daemonize
-
+- Support passing flags to handlers
+- Maintain an input history to resume from in case of early exit
+- Buffer tty read + write requests with redraw
+- URI handling maybe
+- Debug empty lines on stdout
 
 [^4]: which probably won't happen anytime soon
