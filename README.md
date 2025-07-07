@@ -7,13 +7,18 @@ The tool itself doesn't actually do any downloading or processing. Instead, it's
 ```zsh
 
 dl "https://github.com/Squirreljetpack/zsh-dl/tree/main/config" # downloads the folder into your current directory
-dl # Downloads the urls on your clipboard and converts them to markdown
-dl -cd "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/" # Downloads the images (or video) into your current directory.
+
+# with clipboard content: https://www.reddit.com/r/proceduralgeneration/comments/1g5xi6j/a_skull_made_in_a_pixel_shader_no_mesh_no/
+dl # a_skull_made_in_a_pixel_shader_-_no_mesh_no_geometry_just_code.mkv
+
+# Alternate config:
+dl -ca "https://www.youtube.com/watch?v=l5ihnPWKJZU" # Downloads audio (using the alternate config) into your current directory.
+dl -ca "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/" # Downloads images into your current directory.
 ```
 
 [^1]: External dependencies are required.
 
-https://github.com/user-attachments/assets/58ff52a5-f794-4466-a702-05071a963389
+https://github.com/user-attachments/assets/55a36923-0bad-48fe-bc76-a382834af399
 
 
 ## Key Features
@@ -38,7 +43,7 @@ https://github.com/user-attachments/assets/58ff52a5-f794-4466-a702-05071a963389
 
 - Reads from your clipboard for minimal fuss
 
-- Uses [pere](https://github.com/Squirreljetpack/pere) if installed for hassle-free destination determination
+- Uses [lt](https://github.com/Squirreljetpack/lt) if installed for hassle-free destination determination
 
 ### ⚙ Dead Simple Configuration
 
@@ -122,6 +127,7 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 
 - Retry failed downloads
 
+
 ```shell
 > dl -s
 ┌────┬────────────────┬──────────────────────────────────────────┬──────────────────────────────────────────┬──────────────────────────────┬──────┐
@@ -133,6 +139,13 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 └────┴────────────────┴──────────────────────────────────────────┴──────────────────────────────────────────┴──────────────────────────────┴──────┘
 
 ```
+
+### 📋 Task management
+
+- Queue your input, cancel anytime, and resume where you left off
+
+- More on the way
+
 
 # Installation
 
@@ -148,7 +161,7 @@ The installer will prompt you for what to name the executable as. The default is
 
 zsh-dl relies on the following external command-line tools. Certain functionality will be disabled without them:
 
-- [pere](https://github.com/Squirreljetpack/pere): For determining download destination.
+- [lt](https://github.com/Squirreljetpack/lt): For determining download destination.
 - [sqlite3](https://www.sqlite.org/download.html): For logging.
 - clipboard commands (xclip/pbcopy[^3]): For reading from clipboard.
 [^3]: preinstalled on Mac
@@ -172,18 +185,25 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-Usage: dl [-hlesv] [-c name] [--from log_id] […inputs/…log_ids]
+Usage: dl [-hlesvq] [-c name] [-r count] […inputs/…log_ids]
 
-Basic cli extensible download tool.
+Extensible cli download tool.
 
 Options:
-  -c <name>         : Sets name.ini in /home/archr/.config/zsh-dl as the config.
+  -c <name>         : Use name.ini in /home/archr/.config/zsh-dl as the config.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
-  -l […log_ids]     : Show the log for the current config.
-  --from [log_id=1] : Retry failed downloads from log_id.
-  -s                : Skip inputs which succeded in the past. ( ZSHDL_SKIP=true|false )
-  -v [level=2]      : Set the verbosity level. ( VERBOSE=[0-9] )
+  -l […log_ids]     : Show the log for the given log_ids.
+                        'n:' to display the last n logs
+                        '.s' to filter by status
+  --from [log_id=0] : Retry failed downloads.
+  -s                : Skip inputs which succeded in the past.
+  -v                : Set verbosity 2.
+  --queue [file]    : Append input to and read from queue file.
+                        If $ZSHDL_QUEUE_FILE is set, this option is automatically true.
+  -q                : Use the default queue file
+  --verbose [level] : Set verbosity level.
+  --clear [glob]    : Clear logs.
 
 Environment variables and configuration:
   See dl -v -h
@@ -195,23 +215,24 @@ Examples:
     Download book #76257 as a markdown file
   dl "https://github.com/sumoduduk/terminusdm/tree/main/src"
     Download the src/ folder of the sumoduduk/terminusdm in the main branch to the current directory
-  dl "user@host:path/to/your/file.tx
+  dl "user@host:path/to/your/file.tx"
     Downloads over SSH
   dl -ci "google.com"
     Gets info about a URL/file
   dl -cf "path/to/your/script.zsh" "random_weather.py"
     Format local files using the fmt.ini config
-  dl -cm < urls.txt
-    Process a list of URLs in a file (media.ini):
+  dl -ca --queue urls.txt
+    Download a list of URLs in a file (with alternate.ini)
+  dl -q < urls.txt
+    Add URLs to and start the default queue.
 
 Status codes:
-  -2: Unprocessed/Unhandled
-  -1: Handling
-   0: HandlerSuccess
-   1: HandlerError
-   2: PPError
-   3: PPSuccess
-   4: InternalErro
+
+   …: Misc/Processing
+  -2: Unhandled/Skipped
+  -1: Partial Success
+   0: Success
+  >0: Handling error
 ```
 
 # Configuration

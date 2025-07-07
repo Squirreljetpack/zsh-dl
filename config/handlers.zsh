@@ -4,9 +4,9 @@
 http.info() {
   url=$1
   params=$2
-  exec >&2
+  [[ -n $params ]] && params="?$params" # alternatively, just use $TARGET for the original line, see below
 
-  [[ -n $params ]] && params="?$params"
+  exec >&2
   if have httpstat; then
     httpstat "$url$params"
   else
@@ -21,31 +21,52 @@ http.info() {
 http.gutenberg() {
 	id=$1:t # https://gutenberg.org/ebooks/76257 -> 76257
 	url=https://www.gutenberg.org/cache/epub/$id/pg$id-images.html
+
 	http.default $url # downloads the url and outputs the destination filename
 }
 
-# example of customizing the input. This is safe because urls don't have spaces.
+# example of modifying the input arguments for http handlers. (This is safe as is because urls don't have spaces).
 _read_url_params() {
   __read_url_params $@;
   url=${url%%" | "*}
 }
 
 http.ytdlp() {
-  failure_or_show $YTDLPcmd \
-	  -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
-	  --abort-on-unavailable-fragments \
-	  --print after_move:filepath \
-	  $@
+  # yt-dlp can exit 1 even on successful download so we just rely on the output
+  output=$(
+    $YTDLPcmd \
+      -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
+      --abort-on-unavailable-fragments \
+      -v \
+      --print after_move:filepath \
+      $TARGET
+  )
+  [[ -e $output ]] && echo $output
 }
 
-http.images_dl() {
-  failure_or_show $=IMAGESDLcmd $@
+http.images() {
+  failure_or_show $=IMAGESDLcmd $TARGET
+}
+
+http.ytdlp_audio() {
+  output=$(
+    $YTDLPcmd \
+      -f "bestaudio/best" \
+      -ciw \
+      --extract-audio \
+      --audio-format opus \
+      -v \
+      --print after_move:filepath \
+      $TARGET
+  )
+
+  [[ -e $output ]] && echo $output
 }
 
 # Example of fallback to image download if no video present i.e. reddit posts
 http.dl() {
-  failure_or_show http.ytdlp $1 ||
-  failure_or_show http.images_dl $1
+  failure_or_show http.ytdlp $@ ||
+  failure_or_show http.images $@
 }
 
 
@@ -102,7 +123,7 @@ http.git() {
   # strip components=1: maps root/ -> .
   if curl -sL "$archive_url" | success_or_log tar -xzf - --directory "$temp_dir" --strip-components=1 "${archive_root}/${subdir}"; then
     read_dest file $temp_dir/${subdir} || return 0
-    pere -m $temp_dir/${subdir} $dest >/dev/null
+    lt -m $temp_dir/${subdir} $dest >/dev/null
     rm -r $temp_dir
     echo $dest:t
   fi

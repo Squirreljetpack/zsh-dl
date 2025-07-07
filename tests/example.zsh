@@ -3,10 +3,10 @@
 set +x
 
 # download an image or video
-dl "https://www.reddit.com/r/interesting/comments/1l5atla/male_bee_dies_after_ejaculation_while_mating_with/"
+dl "https://www.reddit.com/r/proceduralgeneration/comments/1g5xi6j/a_skull_made_in_a_pixel_shader_no_mesh_no/"
 
 # skip downloaded
-dl -s "https://www.reddit.com/r/interesting/comments/1l5atla/male_bee_dies_after_ejaculation_while_mating_with/" 
+dl -s "https://www.reddit.com/r/proceduralgeneration/comments/1g5xi6j/a_skull_made_in_a_pixel_shader_no_mesh_no/" 
 
 # download a github folder
 dl "https://github.com/Squirreljetpack/zsh-dl/tree/main/config"           

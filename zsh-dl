@@ -172,8 +172,9 @@ __read_proto_stem() {
   elif [[ $proto == $stem ]]; then
     proto=
   fi
-  echo $proto
-  echo $stem
+
+  dbginfo proto
+  dbginfo stem
 }
 
 __read_url_params() {
@@ -266,7 +267,7 @@ ssh.default() {
   : output: successfully created files, one per line
   :
   read_dest ssh $2  || return 0
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return 1 # -u does an update in case we decided to keep the target, :t is due to rsync always copies into directories
+  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return 1 # -u does an update in case we decided to keep the target, :h is due to rsync always copies into directories
   echo $dest
 }
 
@@ -303,7 +304,7 @@ na.na() {
 ## Getters
 
 read_dest() {
-  : arg: protocol '<a path-like string>' '[...pere_args]'
+  : arg: protocol '<a path-like string>' '[...lt_args]'
   : output: 'stores <a valid destination for $2> into the variable dest, otherwise returns 1 and outputs "# " (logs the task as skipped)'
   : notes: 'Prompts the user in case of conflict. Ex.' 'read_dest file $1:r.md -a && echo $dest || return 0'
   :
@@ -328,7 +329,7 @@ read_dest() {
       false
     ;;
   esac
-  dest="$(pere -d ${@:2} $ZSHDL_OUTPUT_DIR$_dest)" || {
+  dest="$(lt -d ${@:2} $ZSHDL_OUTPUT_DIR$_dest)" || {
     echo "# $_dest"
     return 1
   }
@@ -431,7 +432,7 @@ is_function() {
 
 success_or_log() {
   : args: command_to_run args_to_cmd
-  : runs input as a command, and logs stdin+stdout if failed
+  : runs input as a command silencing stdout, and logs stdin+stdout if failed
   : use "success_or_log ..cmd || return" on log failures on critical steps
   :
   result="$($@ 2> >(tee /dev/fd/2))"
@@ -449,7 +450,7 @@ failure_or_show() {
   :
   err_tf="$(mktemp)"
   trap 'rm $err_tf' EXIT
-  output=$($@ 2> >(tee $err_tf >&2))
+  output="$($@ 2> >(tee $err_tf >&2))"
   code=$?
   if ((code)); then
     err_msg="$(< $err_tf)"
@@ -530,6 +531,39 @@ __parse_log_args() {
     esac
   done
   (($#status_filters)) && LOG_FILTER="WHERE LS IN (${(j. .)status_filters})"
+}
+
+__delete_log_entries() {
+  if [[ ! -f $ZSHDL_DB ]]; then
+    internal_err delete_log_entries "Database not found: $ZSHDL_DB"
+    return 1
+  fi
+
+  if [[ $# -eq 0 ]]; then
+    warn delete_log_entries "No log IDs provided."
+    return 0
+  fi
+
+  local query=""
+
+  if [[ "$1" =~ ^([0-9]+):$ ]]; then
+    # Delete last N entries by ID
+    query="DELETE FROM \"$ZSHDL_VARIANT\" WHERE id IN (
+              SELECT id FROM \"$ZSHDL_VARIANT\" $LOG_FILTER
+              ORDER BY id DESC LIMIT ${1%:}
+           );"
+
+  elif [[ "$1" == ":" ]]; then
+    # Delete all entries
+    query="DELETE FROM \"$ZSHDL_VARIANT\" $LOG_FILTER;"
+
+  else
+    # Delete specific IDs
+    ids_list="${${(j.,.)@}%,}"
+    query="DELETE FROM \"$ZSHDL_VARIANT\" WHERE id IN ($ids_list);"
+  fi
+
+  sqlite3 "$ZSHDL_DB" "$query"
 }
 
 __show_log_entries() {
@@ -624,7 +658,7 @@ __show_log() {
      FROM \"$ZSHDL_VARIANT\"
      $LOG_FILTER
      ORDER BY id DESC
-     LIMIT $ZSHDL_LOG_DISPLAY_LIMIT")"
+     LIMIT $ZSHDL_LOG_DISPLAY_LIMIT")" 2>/dev/null
 
   if [[ -z $data ]]; then
     warn show_log "No log entries found"
@@ -749,7 +783,6 @@ __begin_pp() {
 
 __submit_pp() {
   # Args: dest (created filename) [method]
-
   while IFS= read -r dest; do
     # End processing and output when there remain no more methods
     if [[ -z $2 ]]; then
@@ -764,7 +797,7 @@ __submit_pp() {
     fi
 
     _log_dest "$dest" "$2"
-  done <<< ${1:-$'\n'}
+  done <<< $1
 }
 
 ### BEGIN LOGIC
@@ -800,7 +833,7 @@ __input() {
   if (($#)); then
       print -rl -- $@
     else
-      if $STDIN; then
+      if [ -t 0 ]; then
         echo "$(${=PASTEcmd})" # buffer
       else
         cat
@@ -848,17 +881,19 @@ __queue_input() {
     echo "$ZSHDL_QUEUE_MARKER$CURRENT_LINE"
   } >> $ZSHDL_QUEUE_FILE
 
-  cat $ZSHDL_QUEUE_FILE >&2
+  first=true
 
   tail -n +$CURRENT_LINE -- $ZSHDL_QUEUE_FILE | while IFS= read -r line; do
     [[ $line != ${line#$ZSHDL_QUEUE_MARKER} ]] && break
-    
+
     # skip comments
     if [[ $line == ${line#"# "} ]]; then
       echo $line
     else
       ((VERBOSE > 2)) && print $line >&2
     fi
+
+    $first && first=false && continue
 
     __remove_queue_marker
     ((CURRENT_LINE++))
@@ -951,13 +986,13 @@ __begin_lg() {
     fi
 
     if [[ -n $_input ]]; then
-      _input="'${_input//\'/\'\'}'"
+      _input="'${_input//"'"/"''"}'"
     else
       _input=NULL
     fi
 
     if [[ -n $_msg ]]; then
-      _msg="'${msg//\'/\'\'}'"
+      _msg="'${_msg//\'/\'\'}'"
     else
       _msg=NULL
     fi
@@ -1152,22 +1187,32 @@ __edit_config() {
 
   echo "Editing files for the $ZSHDL_VARIANT config:"
 
-  echo "1) Clear Database"
+  echo "1) Clear logs"
   echo "2) $CONFIG"
   for file in ${ZSHDL_CONFIG_FILES[@]}; do
     echo "$i) $file"
     ((i++))
   done
+  echo "-) Remove entries"
+  echo "!) Delete Database"
   print -n "Enter a number to edit: "
   read -r i
 
 
 
   if [[ $i == 1 ]]; then
-    rm $ZSHDL_DB || fatal_err "Could not delete database"
+    sqlite3 $ZSHDL_DB "DROP TABLE '$ZSHDL_VARIANT';" || fatal_err "Could not drop table for $ZSHDL_VARIANT"
     exit
   elif [[ $i == 2 ]]; then
     file=$CONFIG
+  elif [[ $i == "!" ]]; then
+    rm $ZSHDL_DB || fatal_err "Could not delete database"
+    exit
+  elif [[ $i == "-" ]]; then
+    printf "Enter log ids: "
+    read -r line
+    __parse_log_args $=line
+    __delete_log_entries $log_args
   else
     file=${ZSHDL_CONFIG_FILES[$((i-2))]}
   fi
@@ -1256,8 +1301,8 @@ exportCmdVar "YTDLPcmd" \
 exportCmdVar "IMAGESDLcmd" \
   "gallery-dl -D ."
 
-if ! have pere; then
-  pere() {
+if ! have lt; then
+  lt() {
     local file=${@[$#]}
     while  [[ -z $file || -e $file ]]; do
       print -n -u2 "$file exists! Please choose a different name: "
@@ -1338,8 +1383,10 @@ Examples:
     Gets info about a URL/file
   $PROG -cf "path/to/your/script.zsh" "random_weather.py"
     Format local files using the fmt.ini config
-  $PROG -cd < urls.txt
-    Download a list of URLs in a file (with download.ini):
+  $PROG -ca --queue urls.txt
+    Download a list of URLs in a file (with alternate.ini)
+  $PROG -q < urls.txt
+    Add URLs to and start the default queue.
 
 Status codes:
 
