@@ -11,6 +11,8 @@ autoload -Uz colors && colors
 handle() {
   export LS=-3
   export TARGET=$1
+  STAGE=0
+
   [[ -n $TARGET ]] || return
 
   _read_proto_stem $1
@@ -39,8 +41,9 @@ handle_http() {
       method=${_method:1}
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest="$($handler $url $params)" &&
-      __submit_pp $dest $method
+      __read_args
+      dest="$($handler "$url" "$params" $args)" &&
+      __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
   done <<< $HTTP_HANDLERS
@@ -66,8 +69,9 @@ handle_ssh() {
       method=${_method:1}
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest="$($handler $userhost $subpath)" &&
-      __submit_pp $dest $method
+      __read_args
+      dest="$($handler "$userhost" "$subpath" $args)" &&
+      __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
   done <<< $SSH_HANDLERS
@@ -95,8 +99,9 @@ handle_file() {
       method=${_method:1}
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest="$($handler $target $type $mime $encoding)" &&
-      __submit_pp $dest $method
+      __read_args
+      dest="$($handler "$target" "$type" "$mime" "$encoding" $args)" &&
+      __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
 	done <<< $FILE_HANDLERS
@@ -122,8 +127,9 @@ handle_na() {
         method=${_method:1}
         (( VERBOSE > 1 )) && info handler method
         is_function $handler || internal_err
-        dest="$($handler $target)" &&
-        __submit_pp $dest $method
+        __read_args
+        dest="$($handler "$target" $args)" &&
+        __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
       fi
     done <<< $NA_HANDLERS
@@ -146,8 +152,9 @@ handle_misc() {
       method=${_method:1}
       (( VERBOSE > 1 )) && info handler method
       is_function $handler || internal_err
-      dest="$($handler $target)" &&
-      __submit_pp $dest $method
+      __read_args
+      dest="$($handler "$target" $args)" &&
+      __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
   done <<< $MISC_HANDLERS
@@ -206,6 +213,21 @@ _read_proto_stem() { _${funcstack[1]} $@; }
 _read_userhost_subpath()  { _${funcstack[1]} $@; }
 _read_target_type_mime_encoding() { _${funcstack[1]} $@; }
 _read_target() { _${funcstack[1]} $@; }
+
+__read_args() {
+  { [[ -z $INPUT_ARGS ]] } && return 1
+  local _args splitat
+  _args=(${(@Q)${(z)INPUT_ARGS}})
+
+  repeat $STAGE; do
+    splitat=${_args[(ie)--]}
+    ((splitat)) || return 1
+    _args=(${_args:$((splitat))})
+  done
+  splitat=${_args[(ie)--]}
+  ((splitat)) && args=(${_args::$((splitat-1))}) || args=($_args)
+  dbginfo args
+}
 
 
 #### API
@@ -490,6 +512,26 @@ _get_LS_color() {
     *) print -n "${fg[red]}" ;;    # Bright Red (for Errors)
   esac
 }
+
+__parse_log_args() {
+  typeset -ga log_args
+  status_filters=()
+  for param; do
+    case $param in
+      .(-|)[0-9]##)
+        status_filters+=${1#.}
+        ;;
+      [0-9]##(:|))
+        log_args+=($param)
+        ;;
+      *)
+        warn InvalidArg "$param is invalid, skipping."
+        ;;
+    esac
+  done
+  (($#status_filters)) && LOG_FILTER="WHERE LS IN (${(j. .)status_filters})"
+}
+
 __show_log_entries() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log_entries "Database not found: $ZSHDL_DB"
@@ -525,6 +567,7 @@ __show_log_entries() {
     ids_list="${${(j.,.)@}%,}"
     query="$base_select WHERE id IN ($ids_list);"
   fi
+  
   first_entry=true
   stty -icanon -ixon
   sqlite3 -separator $'\t' "$ZSHDL_DB" "$query" |
@@ -607,8 +650,8 @@ __show_log() {
     w1 = max[1]; printf "%d ", w1;                                    # ID (exact width)
     w2 = 14; printf "%d ", w2;                      # Time
     w3 = (max[3]<10)?10:max[3]; w3 = (w3>40)?40:w3; printf "%d ", w3; # Target
-    w4 = (max[4]<10)?10:max[4]; w4 = (w4>40)?40:w4; printf "%d ", w4; # Message
-    w5 = (max[5]<20)?20:max[5]; w5 = (w5>40)?40:w5; printf "%d ", w5; # Destination
+    w4 = (max[4]<7)?7:max[4]; w4 = (w4>40)?40:w4; printf "%d ", w4; # Message
+    w5 = (max[5]<20)?20:max[5]; w5 = (w5>30)?30:w5; printf "%d ", w5; # Destination
     w6 = 2; printf "%d ", w6;                        
   }' <<< "$all_data"))
 
@@ -648,7 +691,6 @@ __show_log() {
     "$(__center_text 'St' "${col_widths[6]}")"
   print "$sep_border"
 
-  # 5. MODIFIED: Read and print 6 columns of data per row.
   while IFS=$'\t' read -r id time target msg dest ls; do
     local color="$(_get_LS_color "$ls")"
     local id_str="$(__center_text "$id" "${col_widths[1]}")"
@@ -677,7 +719,7 @@ __begin_pp() {
   tasks=()
   export INPUT
   export TARGET
-  while IFS=$'\0' read -r INPUT _method TARGET; do
+  while IFS=$'\0' read -r INPUT _method TARGET STAGE; do
     [[ -z $pp ]] && 
     method=${_method%%:*}
     [[ $method != $_method ]] && rest=${_method#$method:} || rest=
@@ -685,8 +727,13 @@ __begin_pp() {
     if is_function pp_$method; then
       (($#tasks >= $ZSHDL_PP_THREADS)) && __wait_any
 
-      dbg "Invoked (Method: $method) for (Input: $INPUT)"
+      dbg_msg="Invoked (Method: $method) for (Input: $INPUT)"
+      dbg $dbg_msg
+
       {
+        __read_args $STAGE
+
+        INPUT=($INPUT $args)
         if dest="$(pp_$method $INPUT)"; then
           exec {pp} > $1
           __submit_pp $dest $rest
@@ -712,11 +759,11 @@ __submit_pp() {
       if [[ $dest != "# "* && -n $dest ]]; then
           [[ $dest == *$'\0'* ]] &&
           err InvalidName "Files cannot contain null characters ($dest)" ||
-          echo $dest$'\0'$2$'\0'$TARGET >&$pp
+          echo $dest$'\0'$2$'\0'$TARGET$'\0'$((++STAGE)) >&$pp
       fi
     fi
 
-    _log_dest $dest $2
+    _log_dest "$dest" "$2"
   done <<< ${1:-$'\n'}
 }
 
@@ -758,7 +805,65 @@ __input() {
       else
         cat
     fi
-  fi | __lg_filter_skipped
+  fi | __lg_filter_skipped | {
+    if [[ -n $ZSHDL_QUEUE_FILE ]]; then
+      __queue_input
+    else
+      cat
+    fi
+  }
+}
+
+ZSHDL_QUEUE_MARKER="# zsh-dl queue-marker: "
+__remove_queue_marker() {
+  [[ -e $ZSHDL_QUEUE_FILE ]] || return 1
+  last_line="$(tail -n 1 -- $ZSHDL_QUEUE_FILE)"
+  last_number=${last_line##$ZSHDL_QUEUE_MARKER}
+  if [[ $last_line != $last_number ]]; then
+    if [[ $last_number == [0-9]## ]]; then
+      CURRENT_LINE=$last_number
+      ex -sc '$d|x' $ZSHDL_QUEUE_FILE
+    else
+      err QueueError "Invalid queue marker encountered"
+    fi
+  else
+    return 1
+  fi
+}
+
+__queue_input() {
+  if __remove_queue_marker; then
+    TRIM=$(( CURRENT_LINE - CURRENT_LINE % 100 ))
+    if ((TRIM)); then
+      tmp="$(mktemp)"
+      tail -n +$((TRIM + 1)) $ZSHDL_QUEUE_FILE > $tmp && mv $tmp $ZSHDL_QUEUE_FILE
+    fi
+    CURRENT_LINE=$((CURRENT_LINE % 100))
+  else
+    CURRENT_LINE=1
+  fi
+
+  {
+    cat
+    echo "$ZSHDL_QUEUE_MARKER$CURRENT_LINE"
+  } >> $ZSHDL_QUEUE_FILE
+
+  cat $ZSHDL_QUEUE_FILE >&2
+
+  tail -n +$CURRENT_LINE -- $ZSHDL_QUEUE_FILE | while IFS= read -r line; do
+    [[ $line != ${line#$ZSHDL_QUEUE_MARKER} ]] && break
+    
+    # skip comments
+    if [[ $line == ${line#"# "} ]]; then
+      echo $line
+    else
+      ((VERBOSE > 2)) && print $line >&2
+    fi
+
+    __remove_queue_marker
+    ((CURRENT_LINE++))
+    printf "$ZSHDL_QUEUE_MARKER$CURRENT_LINE" >> $ZSHDL_QUEUE_FILE
+  done
 }
 
 __mkpipe() {
@@ -798,7 +903,7 @@ __lg_filter_skipped() {
     lines="$(sqlite3 "$ZSHDL_DB" "SELECT DISTINCT target FROM \"$ZSHDL_VARIANT\" WHERE LS = 0")"
     lines=(${(@f)lines})
     while IFS= read -r line; do
-      if ((${lines[(Ie)$line]})); then
+      if ((${lines[(ie)$line]})); then
         TARGET=$line _log_skipped
       else
         echo $line
@@ -822,13 +927,13 @@ __clear_logs() {
 
 __begin_lg() {
   if $ZSHDL_NOLOG; then cat $1 > /dev/null; return; fi
-  mkdir -p $ZSHDL_STATE_DIR || fatal_err Logging "Could not initialize logging directory $ZSHDL_STATE_DIR/.temp"
-  sqlite3 $ZSHDL_DB "CREATE TABLE IF NOT EXISTS \"$ZSHDL_VARIANT\" (id INTEGER PRIMARY KEY, time DATETIME DEFAULT CURRENT_TIMESTAMP, directory TEXT, target TEXT, LS INTEGER, msg TEXT, dest TEXT, input TEXT);"
+  mkdir -p $ZSHDL_STATE_DIR || fatal_err Logging "Could not initialize logging directory $ZSHDL_STATE_DIR"
+  sqlite3 $ZSHDL_DB "CREATE TABLE IF NOT EXISTS \"$ZSHDL_VARIANT\" (id INTEGER PRIMARY KEY, time DATETIME DEFAULT CURRENT_TIMESTAMP, directory TEXT, target TEXT, LS INTEGER, msg TEXT, dest TEXT, input TEXT, args TEXT);"
 
   dbg "sqlite logging database: $ZSHDL_DB"
 
-
-  _fields=(target _msg _dest input)
+  # _ for nullable
+  _fields=(target _msg _dest _input _args)
 
   while IFS=$'\0' read -r LS $_fields; do
     [[ -z $LS ]] && continue
@@ -845,15 +950,14 @@ __begin_lg() {
       continue
     fi
 
-    if [[ -n $input ]]; then
-      _input="'${input//\'/\'\'}'"
+    if [[ -n $_input ]]; then
+      _input="'${_input//\'/\'\'}'"
     else
       _input=NULL
     fi
 
     if [[ -n $_msg ]]; then
-      msg="'${_msg//\'/}'"
-      _msg="'$(sed "s/'//g" <<< $_msg)'"
+      _msg="'${msg//\'/\'\'}'"
     else
       _msg=NULL
     fi
@@ -872,9 +976,15 @@ __begin_lg() {
       _directory=NULL
     fi
 
-    dbginfo target LS _directory _msg _dest
+    if [[ -n $_args ]]; then
+      _args="'${_args//\'/\'\'}'"
+    else
+      _args=NULL
+    fi
 
-    sql_query="INSERT INTO \"$ZSHDL_VARIANT\" (target, LS, directory, msg, dest, input) VALUES ($target, $LS, $_directory, $_msg, $_dest, $_input);"
+    dbginfo target LS _directory _msg _dest _args
+
+    sql_query="INSERT INTO \"$ZSHDL_VARIANT\" (target, LS, directory, msg, dest, input, args) VALUES ($target, $LS, $_directory, $_msg, $_dest, $_input, $_args);"
 
     sqlite3 "$ZSHDL_DB" $sql_query
   done < $1
@@ -912,21 +1022,21 @@ _log_dest() {
   fi
 
   dest=${1/#$HOME/~}
-  if [[ -z $INPUT ]]; then
-  print -u2 -- "${fg[green]}[Completed]${reset_color} $dest"
-  else
-  print -u2 -- "${fg[green]}[Processed]${reset_color} $dest"
-  fi
+
+  [[ -z $INPUT ]] &&
+  args=$INPUT_ARGS
 
   if [[ -n $2 ]]; then
     LS=-1
     method="-> $2"
+    print -u2 -- "${fg[blue]}[Processed]${reset_color} $dest"
   else
     method=
     LS=0
+    print -u2 -- "${fg[green]}[Complete]${reset_color} $dest"
   fi
 
-  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'"$dest"$'\0'$INPUT >&$lg
+  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'"$dest"$'\0'$INPUT$'\0'$args >&$lg
 }
 
 __finish_lg() {
@@ -954,7 +1064,7 @@ __read_config() {
 
   dbg "Reading config from $CONFIG"
   offenders=$(__check_config) && ZSHDL_VARIANT=$CONFIG:r:t || {
-    fatal_err "Invalid config"
+    fatal_err InitError "Invalid config"
   }
 
   typeset -Ug ZSHDL_CONFIG_FILES
@@ -971,7 +1081,7 @@ __read_config() {
   _CONSTANTS=${(j.|.)CONSTANTS}
 
   while IFS='=' read -r key val || [[ -n $key ]]; do
-    [[ ${key%%\#*} == ([[:space:]]##|) ]] && continue
+    [[ ${key%%(\#|\;)*} == ([[:space:]]##|) ]] && continue
     [[ -z $val ]] && warn EmptyKeyFound $key && continue
     case $key in
       ${~_CONSTANTS})
@@ -1013,6 +1123,18 @@ __read_config() {
     protoh="${proto}_HANDLERS"
     : ${(P)protoh::="${(P)protoh}${proto:l}.default:=*"$'\n'}
   done
+
+  if [[ -n $ZSHDL_QUEUE_FILE ]]; then
+    qb=${ZSHDL_QUEUE_FILE%_CONFIG}
+    [[ $qb != $ZSHDL_QUEUE_FILE ]] && ZSHDL_QUEUE_FILE="${qb}_${ZSHDL_VARIANT}"
+
+    if [[ -s $ZSHDL_QUEUE_FILE ]]; then
+      dbg "Queue is nonempty: $ZSHDL_QUEUE_FILE"
+      # check header maybe?
+    elif [[ ! -e $ZSHDL_QUEUE_FILE ]]; then
+      dbg "Queue is empty: $ZSHDL_QUEUE_FILE"
+    fi
+  fi
 }
 
 __check_config() {
@@ -1131,8 +1253,8 @@ exportCmdVar "HTML2MARKDOWNcmd" \
 exportCmdVar "YTDLPcmd" \
   "yt-dlp"
 
-exportCmdVar "GALLERYDLcmd" \
-  "gallery-dl"
+exportCmdVar "IMAGESDLcmd" \
+  "gallery-dl -D ."
 
 if ! have pere; then
   pere() {
@@ -1152,13 +1274,17 @@ fi
 
 unset -f exportCmdVar
 
-CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_EXPLICITSKIP ZSHDL_STRIPWHITESPACE)
+CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_EXPLICITSKIP ZSHDL_STRIPWHITESPACE ZSHDL_QUEUE_FILE)
 
 : ${ZSHDL_CONNECT_TIMEOUT:=5}
 : ${ZSHDL_THREADS:=1}
 : ${ZSHDL_PP_THREADS:=5}
 [[ $VERBOSE == [0-9] ]] || VERBOSE=1
+
+# Skips targets recorded as having executed to success in the log
 [[ $ZSHDL_SKIP == (true|false) ]] || ZSHDL_SKIP=false
+
+# Only log skips incurred by methods (Unprocessed inputs are not logged)
 [[ $ZSHDL_EXPLICITSKIP == (true|false) ]] || ZSHDL_EXPLICITSKIP=true
 [[ $ZSHDL_NOLOG == (true|false) ]] || ZSHDL_NOLOG=false
 [[ $ZSHDL_STRIPWHITESPACE == (true|false) ]] || ZSHDL_STRIPWHITESPACE=false
@@ -1176,7 +1302,7 @@ usage() {
   ((VERBOSE>1)) && __display_api
 
   cat <<EOF
-Usage: $PROG [-hlesv] [-c name] [-r count] […inputs/…log_ids]
+Usage: $PROG [-hlesvq] [-c name] [-r count] […inputs/…log_ids]
 
 Extensible cli download tool.
 
@@ -1184,11 +1310,15 @@ Options:
   -c <name>         : Use name.ini in $ZSHDL_CONFIG_DIR as the config.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
-  -l                : Show the log.
-                        Providing a list of …log_ids or [n]: for the last n logs will display full execution details.
+  -l […log_ids]     : Show the log for the given log_ids.
+                        'n:' to display the last n logs
+                        '.s' to filter by status
   --from [log_id=0] : Retry failed downloads.
   -s                : Skip inputs which succeded in the past.
   -v                : Set verbosity 2.
+  --queue [file]    : Append input to and read from queue file.
+                        If \$ZSHDL_QUEUE_FILE is set, this option is automatically true.
+  -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
 
@@ -1208,8 +1338,8 @@ Examples:
     Gets info about a URL/file
   $PROG -cf "path/to/your/script.zsh" "random_weather.py"
     Format local files using the fmt.ini config
-  $PROG -cm < urls.txt
-    Process a list of URLs in a file (media.ini):
+  $PROG -cd < urls.txt
+    Download a list of URLs in a file (with download.ini):
 
 Status codes:
 
@@ -1260,16 +1390,16 @@ while [[ $# -gt 0 ]]; do
       __clear_logs
       exit
       ;;
-    --filter)
+    --queue)
       if ! $_posargs; then
-        if [[ "$2" =~ ^[0-9,]+$ ]]; then
-          LOG_FILTER="WHERE LS IN ($2)"
+        if [[ $2 != -* ]]; then
+          ZSHDL_QUEUE_FILE=$2
           shift
+          continue
         else
-          err ParseError "Invalid log filter"
+          : ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
         fi
-        shift
-        continue
+        have ex || fatal_err "ex is required for -q"
       fi
       ;|
     --verbose)
@@ -1295,7 +1425,7 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${new_args[@]}"
 
-while getopts "hlevc:r:s" opt; do
+while getopts "hlevc:r:sq" opt; do
     case "$opt" in
         c)
             CONFIG=($ZSHDL_CONFIG_DIR/$OPTARG*.ini)
@@ -1305,6 +1435,9 @@ while getopts "hlevc:r:s" opt; do
             ;;  
         s)
             ZSHDL_SKIP=true
+            ;;
+        q)
+            : ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
             ;;
         v)
             VERBOSE=2
@@ -1328,9 +1461,18 @@ shift $((OPTIND - 1))
 ### BEGIN
 __read_config $CONFIG
 
+
+splitat=${@[(ie)--]}
+if ((splitat)); then
+  export INPUT_ARGS="${(j. .)${(@qq)@:$((splitat+1))}}"
+  set -- ${@:1:$((splitat-1))}
+fi
+
+
 if $SHOWLOG; then
-  if (($#)); then
-    __show_log_entries $@
+  __parse_log_args $@
+  if (($#log_args)); then
+    __show_log_entries $log_args
   else
     __show_log
   fi
@@ -1345,10 +1487,13 @@ __begin_lg $LG &
 LG_ID=$!
 exec {lg}> $LG
 
-CB="$(__mkpipe dl_cb)"
-${=CLIPcmd} < $CB &
-CB_ID=$!
-exec {cb}> $CB
+if [ -t 1 ]; then
+  CB="$(__mkpipe dl_cb)"
+  ${=CLIPcmd} < $CB &
+  CB_ID=$!
+  exec {cb}> $CB
+fi
+
 
 PP="$(__mkpipe dl_pp)"
 { __begin_pp $PP | __output; } &
@@ -1371,7 +1516,7 @@ $ZSHDL_STRIPWHITESPACE && IFS=
 
 exec {pp}>&-
 exec {lg}>&-
-exec {cb}>&-
+[ -t 1 ] && exec {cb}>&-
 
 wait $PP_ID
 # wait $LG_ID

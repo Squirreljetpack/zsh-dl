@@ -30,22 +30,24 @@ _read_url_params() {
   url=${url%%" | "*}
 }
 
-_http.dl() {
-  $YTDLPcmd \
+http.ytdlp() {
+  failure_or_show $YTDLPcmd \
 	  -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
 	  --abort-on-unavailable-fragments \
 	  --print after_move:filepath \
-	  $1 ||
-  $GALLERYDLcmd \
-	  -D . \
-	  $1
-	# i have no idea what options are good
+	  $@
 }
 
-http.dl() {
-  setopt -o pipefail
-  failure_or_show _http.dl $1
+http.images_dl() {
+  failure_or_show $=IMAGESDLcmd $@
 }
+
+# Example of fallback to image download if no video present i.e. reddit posts
+http.dl() {
+  failure_or_show http.ytdlp $1 ||
+  failure_or_show http.images_dl $1
+}
+
 
 # Downloads folders, images, or single branches of repositories from github/gitlab/huggingface. Only github is fully supported.
 http.git() {
@@ -139,6 +141,7 @@ file.walk() {
 
 file.info() {
   file -L $1 >&2
+  echo $1
 }
 
 file.fmt_py() {
