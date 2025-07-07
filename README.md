@@ -32,7 +32,7 @@ https://github.com/user-attachments/assets/55a36923-0bad-48fe-bc76-a382834af399
 
   - Project Gutenberg books (auto-convert to Markdown)
 
-  - Media downloads (images/videos)[^1]
+  - Media downloads (images/videos/audio)[^1]
   
   - Multithreaded, chunked and resumable downloads
   
@@ -106,11 +106,10 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 ```
 ```shell
 # format all your files with strict settings
-
 > FORMAT=strict dl --config fmt *
+
 # or just
-> dl -cf *
-# format all your files with default settings
+> dl -cf * # format all your files with default settings
 ```
 
 [^2]: ok yes it does feel kinda useless considering that its not much harder to just call curl or rsync. But github download is pretty nice, and even if its an overengineered alias, its still pretty handy to use. Feel free to give it a try! Also, there is a purpose in all of it, even if it'll probably take a rewrite in Rust :p.
@@ -222,7 +221,7 @@ Examples:
   dl -cf "path/to/your/script.zsh" "random_weather.py"
     Format local files using the fmt.ini config
   dl -ca --queue urls.txt
-    Download a list of URLs in a file (with alternate.ini)
+    Download audio from a list of youtube urls (with alternate.ini)
   dl -q < urls.txt
     Add URLs to and start the default queue.
 

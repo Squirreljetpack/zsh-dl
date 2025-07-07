@@ -463,6 +463,19 @@ failure_or_show() {
 
 }
 
+
+log_stderr() {
+  : args: command_to_run args_to_cmd
+  : outputs: same as command, but duplicates stderr to logging
+  :
+  err_tf="$(mktemp)"
+  trap 'rm $err_tf' EXIT
+  $@ 2> >(tee $err_tf >&2)
+  code=$?
+  err_msg="$(< $err_tf)"
+  LS=$code err ${funcstack[2]} $err_msg
+}
+
 ## Log rendering utils
 
 # Strips ANSI codes to get the real string length
@@ -522,7 +535,7 @@ __parse_log_args() {
       .(-|)[0-9]##)
         status_filters+=${1#.}
         ;;
-      [0-9]##(:|))
+      [0-9]#(:|))
         log_args+=($param)
         ;;
       *)
@@ -566,6 +579,8 @@ __delete_log_entries() {
   sqlite3 "$ZSHDL_DB" "$query"
 }
 
+
+# todo: combine dest + message maybe
 __show_log_entries() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log_entries "Database not found: $ZSHDL_DB"
@@ -630,17 +645,19 @@ __show_log_entries() {
     fi
 
     print
-    print "  Message:"
-    if [[ -n "$log_msg" ]]; then
-      print -r -- "${log_msg}" | sed 's/^/    /'
-    else
-      print "    (No message)"
+    
+    if [[ -n "${log_dest# }" ]]; then
+        print "  Destination:"
+        print -r -- "${log_dest}" | sed -e 's/^/    /' -e 's/ \\\\ /\n/'
+    elif [[ -n "${log_msg# }" ]]; then
+        print "  Message:"
+        print -r -- "${log_msg}" | sed 's/^/    /'
     fi
 
   done
 }
 
-
+# todo: 
 __show_log() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log "Database not found: $ZSHDL_DB"
@@ -979,7 +996,7 @@ __begin_lg() {
     }
 
     if [[ -n $target ]]; then
-      target="'${target//\'/\'\'}'"
+      target="'${target//\'/"''"}'"
     else
       dbg "Logging: Empty target"
       continue
@@ -992,27 +1009,22 @@ __begin_lg() {
     fi
 
     if [[ -n $_msg ]]; then
-      _msg="'${_msg//\'/\'\'}'"
+      _msg="'${_msg//\'/"''"}'"
     else
       _msg=NULL
     fi
 
     _dest=${_dest#"# "}
     if [[ -n $_dest ]]; then
-      if [[ $PWD == *\'* || $_dest ==  *\'* ]]; then
-        err Logging "Destination or Directory contains invalid characters, skipping log."
-        continue
-      fi
-
-      _dest="'${_dest}'"
-      _directory="'${PWD}'"
+      _dest="'${_dest//\'/"''"}'"
+      _directory="'${PWD//\'/"''"}'"
     else
       _dest=NULL
       _directory=NULL
     fi
 
     if [[ -n $_args ]]; then
-      _args="'${_args//\'/\'\'}'"
+      _args="'${_args//\'/"''"}'"
     else
       _args=NULL
     fi
@@ -1029,6 +1041,10 @@ __begin_lg() {
 
 _log_msg() {
   [[ -z $LS || -z $TARGET || -z $1 ]] && return 1 # only run outside of thread
+  if [[ $TARGET$INPUT == *$'\n'* ]]; then
+    internal_err "Logging failed: Target ($TARGET) or Input ($INPUT) contains newlines"
+    return
+  fi
 
   msg=${${1%%$'\n'##}//$'\n'/' \\\\ '}
   print -r -- $LS$'\0'$TARGET$'\0'$1$'\0'"# "$'\0'$INPUT >&$lg
@@ -1384,7 +1400,7 @@ Examples:
   $PROG -cf "path/to/your/script.zsh" "random_weather.py"
     Format local files using the fmt.ini config
   $PROG -ca --queue urls.txt
-    Download a list of URLs in a file (with alternate.ini)
+    Download audio from a list of youtube urls (with alternate.ini)
   $PROG -q < urls.txt
     Add URLs to and start the default queue.
 
