@@ -16,7 +16,7 @@ handle() {
   [[ -n $TARGET ]] || return
 
   _read_proto_stem $1
-  dbginfo proto
+  dbgvar proto
 
   handle=handle_$proto
   if is_function $handle; then
@@ -28,8 +28,8 @@ handle() {
 
 handle_http() {
   _read_url_params $1
-  info url
-  [[ -n $params ]] && info params
+  infovar url
+  [[ -n $params ]] && infovar params
 
   while IFS='=' read -r _handler pattern; do
     patterns=("${(s.:.)pattern}")
@@ -39,10 +39,10 @@ handle_http() {
       _method=${_handler#$handler}
       seperator=${_method:0:1}
       method=${_method:1}
-      (( VERBOSE > 1 )) && info handler method
+      (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$url" "$params" $args)" &&
+      dest="$($handler "$url" "$params")" &&
       __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
@@ -57,7 +57,7 @@ handle_https() {
 
 handle_ssh() {
   _read_userhost_subpath $1
-  info userhost subpath
+  infovar userhost subpath
 
   while IFS='=' read -r _handler pattern; do
     patterns=("${(s.:.)pattern}")
@@ -67,10 +67,10 @@ handle_ssh() {
       _method=${_handler#$handler}
       seperator=${_method:0:1}
       method=${_method:1}
-      (( VERBOSE > 1 )) && info handler method
+      (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$userhost" "$subpath" $args)" &&
+      dest="$($handler "$userhost" "$subpath")" &&
       __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
@@ -85,7 +85,7 @@ handle_sftp() {
 
 handle_file() {
   _read_target_type_mime_encoding $1
-  info target type mime encoding
+  infovar target type mime encoding
 	
   while IFS='=' read -r _handler pattern; do
 	  patterns=("${(s.:.)pattern}")
@@ -97,10 +97,10 @@ handle_file() {
       _method=${_handler#$handler}
       seperator=${_method:0:1}
       method=${_method:1}
-      (( VERBOSE > 1 )) && info handler method
+      (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$target" "$type" "$mime" "$encoding" $args)" &&
+      dest="$($handler "$target" "$type" "$mime" "$encoding")" &&
       __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
@@ -115,6 +115,7 @@ handle_na() {
   if [[ -e $target ]]; then
     handle_file $target
     return
+  # require username
   elif [[ $target =~ '^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+:.+$' ]]; then
     handle_ssh $target
     return
@@ -125,10 +126,10 @@ handle_na() {
         _method=${_handler#$handler}
         seperator=${_method:0:1}
         method=${_method:1}
-        (( VERBOSE > 1 )) && info handler method
+        (( VERBOSE > 1 )) && infovar handler method
         is_function $handler || internal_err
         __read_args
-        dest="$($handler "$target" $args)" &&
+        dest="$($handler "$target")" &&
         __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
       fi
@@ -141,7 +142,7 @@ handle_na() {
 # empty proto_handler for user to use if they want to force some handler methods
 handle_misc() {
   _read_target $1
-  info target
+  infovar target
 
   while IFS='=' read -r _handler pattern; do
     if [[ $target == $~pattern ]]; then
@@ -150,10 +151,10 @@ handle_misc() {
       _method=${_handler#$handler}
       seperator=${_method:0:1}
       method=${_method:1}
-      (( VERBOSE > 1 )) && info handler method
+      (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$target" $args)" &&
+      dest="$($handler "$target")" &&
       __submit_pp "$dest" "$method"
       [[ $seperator == : ]] && return
     fi
@@ -173,8 +174,8 @@ __read_proto_stem() {
     proto=
   fi
 
-  dbginfo proto
-  dbginfo stem
+  dbgvar proto
+  dbgvar stem
 }
 
 __read_url_params() {
@@ -216,18 +217,19 @@ _read_target_type_mime_encoding() { _${funcstack[1]} $@; }
 _read_target() { _${funcstack[1]} $@; }
 
 __read_args() {
-  { [[ -z $INPUT_ARGS ]] } && return 1
+  { [[ -z $ARGS_ALL ]] } && return 1
   local _args splitat
-  _args=(${(@Q)${(z)INPUT_ARGS}})
+  _args=(${(@Q)${(z)ARGS_ALL}})
+
 
   repeat $STAGE; do
-    splitat=${_args[(ie)--]}
+    splitat=${_args[(ie):]}
     ((splitat)) || return 1
     _args=(${_args:$((splitat))})
   done
-  splitat=${_args[(ie)--]}
-  ((splitat)) && args=(${_args::$((splitat-1))}) || args=($_args)
-  dbginfo args
+  splitat=${_args[(ie):]}
+  ((splitat)) && ARGS=(${_args::$((splitat-1))}) || ARGS=($_args)
+  dbgvar ARGS
 }
 
 
@@ -406,6 +408,16 @@ warn() {
 
 info() {
   ((VERBOSE)) || return
+  print -u2 -- "${fg[blue]}[INFO: $1]${reset_color} $2"
+  [[ -n $TARGET ]] && _log_msg "[INFO: $1] $2"
+}
+
+dbg() {
+  ((VERBOSE > 1)) && print -u2 -- "${fg[blue]}[DEBUG]${reset_color} $1"
+}
+
+infovar() {
+  ((VERBOSE)) || return
   while (($#)); do
     print -u2 -- "${fg[blue]}[INFO: $1]${reset_color} ${(P)1}"
     [[ -n $TARGET ]] && ((VERBOSE>1)) && _log_msg "[INFO: $1] ${(P)1}"
@@ -413,11 +425,7 @@ info() {
   done
 }
 
-dbg() {
-  ((VERBOSE > 1)) && print -u2 -- "${fg[blue]}[DEBUG]${reset_color} $1"
-}
-
-dbginfo() {
+dbgvar() {
   ((VERBOSE > 1)) || return
   while (($#)); do
     print -u2 -- "${fg[blue]}[INFO: $1]${reset_color} ${(P)1}"
@@ -473,7 +481,11 @@ log_stderr() {
   $@ 2> >(tee $err_tf >&2)
   code=$?
   err_msg="$(< $err_tf)"
-  LS=$code err ${funcstack[2]} $err_msg
+  if ((code > 0)); then
+    LS=$code err ${funcstack[2]} $err_msg
+  else
+    LS=$code info ${funcstack[2]} $err_msg
+  fi
 }
 
 ## Log rendering utils
@@ -784,7 +796,7 @@ __begin_pp() {
       {
         __read_args $STAGE
 
-        INPUT=($INPUT $args)
+        INPUT=($INPUT)
         if dest="$(pp_$method $INPUT)"; then
           exec {pp} > $1
           __submit_pp $dest $rest
@@ -846,16 +858,17 @@ __input() {
     return
   fi
 
-  # todo: try cycling for input in the future
-  if (($#)); then
-      print -rl -- $@
+  {
+    if (($#INPUTS)); then
+      print -rl -- $INPUTS
     else
       if [ -t 0 ]; then
         echo "$(${=PASTEcmd})" # buffer
       else
         cat
+      fi
     fi
-  fi | __lg_filter_skipped | {
+  } | __lg_filter_skipped | {
     if [[ -n $ZSHDL_QUEUE_FILE ]]; then
       __queue_input
     else
@@ -865,16 +878,18 @@ __input() {
 }
 
 ZSHDL_QUEUE_MARKER="# zsh-dl queue-marker: "
+
+# remove the last line, and read it for the current line (progress)
 __remove_queue_marker() {
   [[ -e $ZSHDL_QUEUE_FILE ]] || return 1
   last_line="$(tail -n 1 -- $ZSHDL_QUEUE_FILE)"
   last_number=${last_line##$ZSHDL_QUEUE_MARKER}
   if [[ $last_line != $last_number ]]; then
     if [[ $last_number == [0-9]## ]]; then
-      CURRENT_LINE=$last_number
-      ex -sc '$d|x' $ZSHDL_QUEUE_FILE
+      ex -sc '$d|x' $ZSHDL_QUEUE_FILE # delete last line
     else
       err QueueError "Invalid queue marker encountered"
+      return 1
     fi
   else
     return 1
@@ -883,12 +898,13 @@ __remove_queue_marker() {
 
 __queue_input() {
   if __remove_queue_marker; then
-    TRIM=$(( CURRENT_LINE - CURRENT_LINE % 100 ))
+    CURRENT_LINE=$last_number
+    TRIM=$(( CURRENT_LINE - CURRENT_LINE % ZSHDL_MAX_QUEUE_SIZE ))
     if ((TRIM)); then
       tmp="$(mktemp)"
-      tail -n +$((TRIM + 1)) $ZSHDL_QUEUE_FILE > $tmp && mv $tmp $ZSHDL_QUEUE_FILE
+      tail -n +$(( TRIM + 1 )) $ZSHDL_QUEUE_FILE > $tmp && mv $tmp $ZSHDL_QUEUE_FILE
     fi
-    CURRENT_LINE=$((CURRENT_LINE % 100))
+    CURRENT_LINE=$(( CURRENT_LINE % ZSHDL_MAX_QUEUE_SIZE ))
   else
     CURRENT_LINE=1
   fi
@@ -897,8 +913,6 @@ __queue_input() {
     cat
     echo "$ZSHDL_QUEUE_MARKER$CURRENT_LINE"
   } >> $ZSHDL_QUEUE_FILE
-
-  first=true
 
   tail -n +$CURRENT_LINE -- $ZSHDL_QUEUE_FILE | while IFS= read -r line; do
     [[ $line != ${line#$ZSHDL_QUEUE_MARKER} ]] && break
@@ -909,8 +923,6 @@ __queue_input() {
     else
       ((VERBOSE > 2)) && print $line >&2
     fi
-
-    $first && first=false && continue
 
     __remove_queue_marker
     ((CURRENT_LINE++))
@@ -990,7 +1002,7 @@ __begin_lg() {
   while IFS=$'\0' read -r LS $_fields; do
     [[ -z $LS ]] && continue
 
-    [[ $LS == (-|)[0-5] ]] || {
+    [[ $LS == (-|)[0-9] ]] || {
       dbg "[Logging: Invalid LS] $LS"
       continue
     }
@@ -1029,7 +1041,7 @@ __begin_lg() {
       _args=NULL
     fi
 
-    dbginfo target LS _directory _msg _dest _args
+    ((VERBOSE > 2)) && dbgvar target LS _directory _msg _dest _args
 
     sql_query="INSERT INTO \"$ZSHDL_VARIANT\" (target, LS, directory, msg, dest, input, args) VALUES ($target, $LS, $_directory, $_msg, $_dest, $_input, $_args);"
 
@@ -1047,7 +1059,7 @@ _log_msg() {
   fi
 
   msg=${${1%%$'\n'##}//$'\n'/' \\\\ '}
-  print -r -- $LS$'\0'$TARGET$'\0'$1$'\0'"# "$'\0'$INPUT >&$lg
+  print -r -- $LS$'\0'$TARGET$'\0'$msg$'\0'"# "$'\0'$INPUT >&$lg
 }
 
 _log_skipped() {
@@ -1075,7 +1087,7 @@ _log_dest() {
   dest=${1/#$HOME/~}
 
   [[ -z $INPUT ]] &&
-  args=$INPUT_ARGS
+  args=$ARGS_ALL
 
   if [[ -n $2 ]]; then
     LS=-1
@@ -1242,7 +1254,7 @@ __edit_config() {
 
 __display_api() {
 
-  echo "Check $ZSHDL_CONFIG_DIR for how to define your hadnlers and matching rules"
+  echo "Check $ZSHDL_CONFIG_DIR for how to define your handlers and matching rules"
 
   echo "\n### DEFAULT HANDLERS ###\n"
 
@@ -1253,13 +1265,19 @@ __display_api() {
 
   echo "\n### API ###\n"
 
-  api=(read_dest failure_or_show success_or_log)
+  api=(read_dest failure_or_show success_or_log log_stderr)
   for f in $api; do
     functions $f
   done
 
   if ((VERBOSE > 2)); then
-    api=(info warn err dbg fatal_err have get_file_type get_html_field get_real)
+    api=(infovar infovar warn err dbg vardbg fatal_err have get_file_type get_html_field get_real)
+    for f in $api; do
+      functions $f
+    done
+
+    echo "\n### Additional ###\n"
+    overrides=(__read_proto_stem __read_url_params __read_target_type_mime_encoding __read_userhost_subpath __read_target)
     for f in $api; do
       functions $f
     done
@@ -1352,6 +1370,7 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 : ${ZSHDL_FORCE_PROTO}
 : ${ZSHDL_OUTPUT_DIR:=./}
 : ${ZSHDL_LOG_DISPLAY_LIMIT:=50}
+: ${ZSHDL_MAX_QUEUE_SIZE:=500}
 
 : ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
 ZSHDL_DB=$ZSHDL_STATE_DIR/log.db
@@ -1363,11 +1382,13 @@ usage() {
   ((VERBOSE>1)) && __display_api
 
   cat <<EOF
-Usage: $PROG [-hlesvq] [-c name] [-r count] […inputs/…log_ids]
+Usage: $PROG [-hlesvq] [-c name] [-r count] [-x input] […log_ids]
 
 Extensible cli download tool.
 
 Options:
+  -x <input>        : Process <input> instead of reading from stdin/clipboard.
+                        Can be specified multiple times.
   -c <name>         : Use name.ini in $ZSHDL_CONFIG_DIR as the config.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
@@ -1382,6 +1403,8 @@ Options:
   -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
+  …method_args      : Passed to the ARGS array of methods.
+                        ':' applies the arguments to the next stage's method.
 
 Environment variables and configuration:
   See $PROG -v -h
@@ -1389,15 +1412,15 @@ Environment variables and configuration:
 Examples:
   $PROG
     Parses clipboard for urls to download
-  $PROG "https://gutenberg.org/ebooks/76257"
+  $PROG -x "https://gutenberg.org/ebooks/76257"
     Download book #76257 as a markdown file
-  $PROG "https://github.com/sumoduduk/terminusdm/tree/main/src"
+  $PROG -x "https://github.com/sumoduduk/terminusdm/tree/main/src"
     Download the src/ folder of the sumoduduk/terminusdm in the main branch to the current directory
-  $PROG "user@host:path/to/your/file.tx"
+  $PROG -x "user@host:path/to/your/file.tx"
     Downloads over SSH
-  $PROG -ci "google.com"
+  $PROG -ci -x "google.com"
     Gets info about a URL/file
-  $PROG -cf "path/to/your/script.zsh" "random_weather.py"
+  $PROG -cf -x "path/to/your/script.zsh" -x "random_weather.py"
     Format local files using the fmt.ini config
   $PROG -ca --queue urls.txt
     Download audio from a list of youtube urls (with alternate.ini)
@@ -1416,7 +1439,7 @@ EOF
   (($#)) && exit $1
 }
 
-EDIT=false
+SHOWEDIT=false
 SHOWLOG=false
 SHOWHELP=false
 RETRY_FROM=0
@@ -1488,13 +1511,15 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${new_args[@]}"
 
-while getopts "hlevc:r:sq" opt; do
+
+INPUTS=()
+while getopts "hlevc:r:sqx:" opt; do
     case "$opt" in
         c)
             CONFIG=($ZSHDL_CONFIG_DIR/$OPTARG*.ini)
             ;;
         e)
-            EDIT=true
+            SHOWEDIT=true
             ;;  
         s)
             ZSHDL_SKIP=true
@@ -1511,6 +1536,9 @@ while getopts "hlevc:r:sq" opt; do
         l)
             SHOWLOG=true
             ;;
+        x)
+            INPUTS+=($OPTARG)
+            ;;
         *)
             usage 1
             ;;
@@ -1524,13 +1552,7 @@ shift $((OPTIND - 1))
 ### BEGIN
 __read_config $CONFIG
 
-
-splitat=${@[(ie)--]}
-if ((splitat)); then
-  export INPUT_ARGS="${(j. .)${(@qq)@:$((splitat+1))}}"
-  set -- ${@:1:$((splitat-1))}
-fi
-
+export ARGS_ALL="${(j. .)${(@qq)@}}"
 
 if $SHOWLOG; then
   __parse_log_args $@
@@ -1542,7 +1564,7 @@ if $SHOWLOG; then
   exit
 fi
 
-$EDIT && __edit_config $CONFIG
+$SHOWEDIT && __edit_config $CONFIG
 
 # Begin
 LG="$(__mkpipe dl_lg)"

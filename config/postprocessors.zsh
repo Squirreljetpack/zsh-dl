@@ -14,4 +14,5 @@ pp_markdown() {
 
 pp_test() {
   echo $@
+  echo $ARGS
 }

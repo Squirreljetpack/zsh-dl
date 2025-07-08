@@ -19,13 +19,13 @@ http.info() {
 # Then http.handlers are passed: www.google.com/search, q=example
 
 http.gutenberg() {
-	id=$1:t # https://gutenberg.org/ebooks/76257 -> 76257
-	url=https://www.gutenberg.org/cache/epub/$id/pg$id-images.html
+  id=$1:t # https://gutenberg.org/ebooks/76257 -> 76257
+  url=https://www.gutenberg.org/cache/epub/$id/pg$id-images.html
 
-	http.default $url # downloads the url and outputs the destination filename
+  http.default $url # downloads the url and outputs the destination filename
 }
 
-# example of modifying the input arguments for http handlers. (This is safe as is because urls don't have spaces).
+# example of modifying the input arguments for http handlers. (This is safe as is because urls don't have spaces). See dl -vh for definition.
 _read_url_params() {
   __read_url_params $@;
   url=${url%%" | "*}
@@ -33,32 +33,36 @@ _read_url_params() {
 
 http.ytdlp() {
   # yt-dlp can exit 1 even on successful download so we just rely on the output
-  output=$(
-    $YTDLPcmd \
+  # Unfortunately is no way to show progress with :filepath, get_recent could be a possible workaround but
+  # for sake of consistency we eschew that here for -v so the user has at least an idea of what's happening.
+  output="$(
+    log_stderr $YTDLPcmd \
       -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
       --abort-on-unavailable-fragments \
-      -v \
       --print after_move:filepath \
+      -v \
+      $ARGS \
       $TARGET
-  )
+  )"
   [[ -e $output ]] && echo $output
 }
 
 http.images() {
-  failure_or_show $=IMAGESDLcmd $TARGET
+  failure_or_show $=IMAGESDLcmd $ARGS $TARGET
 }
 
 http.ytdlp_audio() {
-  output=$(
-    $YTDLPcmd \
+  output="$(
+    log_stderr $YTDLPcmd \
       -f "bestaudio/best" \
       -ciw \
       --extract-audio \
       --audio-format opus \
-      -v \
       --print after_move:filepath \
+      -v \
+      $ARGS \
       $TARGET
-  )
+  )"
 
   [[ -e $output ]] && echo $output
 }
@@ -70,15 +74,17 @@ http.dl() {
 }
 
 
-# Downloads folders, images, or single branches of repositories from github/gitlab/huggingface. Only github is fully supported.
+# Downloads folders, images, or single branches of repositories from
+# github/gitlab/huggingface. Only github is fully supported.
 http.git() {
-	sep="(-/|)(tree|blob)"
+  sep="(-/|)(tree|blob)"
 
   # https://github.com/Squirreljetpack/fzs/tree/main/src ->
   # https://github.com/Squirreljetpack/fzs, Squirreljetpack/fzs, github.com 
   base=${${1%%/$~sep/*}#*://}
   root=${${base#*://}:h1}
   user_repo=${base#*/}
+
 
   # main/src, (/-)/tree/, 
   rest=${1#*/$~sep/}
@@ -90,17 +96,15 @@ http.git() {
     ref_path="$(get_ref_path $ref)"
   fi
 
-  dbginfo subdir ref
+  dbgvar subdir ref
 
   if [[ -z $subdir || $root != github.com ]]; then
     if [[ $ref_path == refs/heads/* ]]; then
       branch=${ref_path#refs/heads/}
-      info branch
-      _ARGS="--branch $branch"
-    else
-      _ARGS=""
+      infovar branch
+      args+=(--branch $branch)
     fi
-    _ARGS=$_ARGS ssh.clone git@$root ${user_repo%.git}.git
+    ssh.clone git@$root ${user_repo%.git}.git
     return
   fi
 
@@ -118,7 +122,7 @@ http.git() {
   archive_root="${user_repo##*/}-$ref"
   temp_dir="$(mktemp -d)"
 
-  info user_repo archive_url temp_dir
+  infovar user_repo archive_url temp_dir
 
   # strip components=1: maps root/ -> .
   if curl -sL "$archive_url" | success_or_log tar -xzf - --directory "$temp_dir" --strip-components=1 "${archive_root}/${subdir}"; then
@@ -137,13 +141,10 @@ ssh.info() {
   ssh -vT $1 >&2
 }
 
-# Example:
-# If dl recieves:                (ssh://)user@host:path/to/file
-# Then ssh.handlers are passed:  user@host:path/to/file user@host path/to/file
-
 ssh.clone() {
-	read_dest ssh $2 || return 0 # read_dest provides a valid destination path to the dest variable given the path-like component corresponding to the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
-	success_or_log git clone --single-branch ${=_ARGS} $1:$2 $dest || return # _ARGS is included to allow passing arguments to git clone when manually invoked, see http_git.
+  read_dest ssh $2 || return 0 # read_dest provides a valid destination path to the dest variable given the path-like component corresponding to the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
+
+  success_or_log git clone $ARGS --single-branch $1:$2 $dest || return
   echo $dest
 }
 
@@ -166,13 +167,13 @@ file.info() {
 }
 
 file.fmt_py() {
-  [[ -e ~/ruff_$FORMAT.toml ]] && opts+=(--config ~/ruff_$FORMAT.toml) || opts=()
-  failure_or_show ruff format $opts $1
+  [[ -e ~/ruff_$FORMAT.toml ]] && ARGS+=(--config ~/ruff_$FORMAT.toml)
+  failure_or_show ruff format $ARGS $1
 }
 
 file.fmt_biome() {
-  [[ -e ~/biome_$FORMAT.toml ]] && opts=(--config-path ~/biome_$FORMAT.toml) || opts=()
-  failure_or_show biome format $opts $1
+  [[ -e ~/biome_$FORMAT.toml ]] && ARGS+=(--config-path ~/biome_$FORMAT.toml)
+  failure_or_show biome format $ARGS $1
 }
 
 file.fmt_sh() {

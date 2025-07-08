@@ -67,7 +67,7 @@ ZSHDL_THREADS=5 # 5 download threads
 ```shell
 
 # Run with
-dl "https://jless.io/user-guide"
+dl -x "https://jless.io/user-guide"
 # or
 dl < urls.txt
 # or just
@@ -184,7 +184,7 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-Usage: dl [-hlesvq] [-c name] [-r count] […inputs/…log_ids]
+Usage: dl [-hlesvq] [-c name] [-r count] [-x input] […log_ids/…method_args]
 
 Extensible cli download tool.
 
@@ -203,6 +203,8 @@ Options:
   -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
+  …method_args      : Passed to the ARGS array of methods.
+                        ':' applies the arguments to the next stage's method.
 
 Environment variables and configuration:
   See dl -v -h

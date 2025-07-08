@@ -23,11 +23,11 @@ have() {
 if have lt; then
 	cmd=(lt -c)
 else
-	cmd=(cp -ar)
+	cmd=(cp -air)
 fi
 
 for f in config/*; do
-	$cmd $f $ZSHDL_CONFIG_DIR/ >/dev/null
+	$cmd $f $ZSHDL_CONFIG_DIR/ >/dev/null || :
 done
 
 print -n -- "What name should zsh-dl be installed to?: (dl)"
@@ -35,6 +35,6 @@ read -r name
 : ${name:=dl}
 
 chmod +x zsh-dl
-$cmd zsh-dl $ZSHDL_INSTALL_DIR/$name >/dev/null
+cp zsh-dl $ZSHDL_INSTALL_DIR/$name >/dev/null
 
 echo "Installation complete!"
