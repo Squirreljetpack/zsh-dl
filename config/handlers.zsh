@@ -33,18 +33,16 @@ _read_url_params() {
 
 http.ytdlp() {
   # yt-dlp can exit 1 even on successful download so we just rely on the output
-  # Unfortunately is no way to show progress with :filepath, get_recent could be a possible workaround but
-  # for sake of consistency we eschew that here for -v so the user has at least an idea of what's happening.
-  output="$(
-    log_stderr $YTDLPcmd \
-      -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
-      --abort-on-unavailable-fragments \
-      --print after_move:filepath \
-      -v \
-      $ARGS \
-      $TARGET
-  )"
-  [[ -e $output ]] && echo $output
+  # Unfortunately is no way to show progress with :filepath, but -v can give some indication
+  ((VERBOSE > 1)) && ARGS+=(-v)
+
+  log_stderr $YTDLPcmd \
+    -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
+    --abort-on-unavailable-fragments \
+    --print after_move:filepath \
+    -o "%(title)s.%(ext)s" \
+    $ARGS \
+    $TARGET
 }
 
 http.images() {
@@ -52,19 +50,17 @@ http.images() {
 }
 
 http.ytdlp_audio() {
-  output="$(
-    log_stderr $YTDLPcmd \
-      -f "bestaudio/best" \
-      -ciw \
-      --extract-audio \
-      --audio-format opus \
-      --print after_move:filepath \
-      -v \
-      $ARGS \
-      $TARGET
-  )"
+  ((VERBOSE > 1)) && ARGS+=(-v)
 
-  [[ -e $output ]] && echo $output
+  log_stderr $YTDLPcmd \
+    -f "bestaudio/best" \
+    -ciw \
+    --extract-audio \
+    --audio-format opus \
+    --print after_move:filepath \
+    -o "%(title)s.%(ext)s" \
+    $ARGS \
+    $TARGET
 }
 
 # Example of fallback to image download if no video present i.e. reddit posts

@@ -42,8 +42,8 @@ handle_http() {
       (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$url" "$params")" &&
-      __submit_pp "$dest" "$method"
+      $handler "$url" "$params" |
+        __submit_pp "$method"
       [[ $seperator == : ]] && return
     fi
   done <<< $HTTP_HANDLERS
@@ -70,8 +70,8 @@ handle_ssh() {
       (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$userhost" "$subpath")" &&
-      __submit_pp "$dest" "$method"
+      $handler "$userhost" "$subpath" |
+        __submit_pp "$method"
       [[ $seperator == : ]] && return
     fi
   done <<< $SSH_HANDLERS
@@ -100,8 +100,8 @@ handle_file() {
       (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$target" "$type" "$mime" "$encoding")" &&
-      __submit_pp "$dest" "$method"
+      $handler "$target" "$type" "$mime" "$encoding" |
+        __submit_pp "$method"
       [[ $seperator == : ]] && return
     fi
 	done <<< $FILE_HANDLERS
@@ -129,8 +129,8 @@ handle_na() {
         (( VERBOSE > 1 )) && infovar handler method
         is_function $handler || internal_err
         __read_args
-        dest="$($handler "$target")" &&
-        __submit_pp "$dest" "$method"
+        $handler "$target" |
+          __submit_pp "$method"
       [[ $seperator == : ]] && return
       fi
     done <<< $NA_HANDLERS
@@ -154,8 +154,8 @@ handle_misc() {
       (( VERBOSE > 1 )) && infovar handler method
       is_function $handler || internal_err
       __read_args
-      dest="$($handler "$target")" &&
-      __submit_pp "$dest" "$method"
+      $handler "$target" |
+        __submit_pp "$method"
       [[ $seperator == : ]] && return
     fi
   done <<< $MISC_HANDLERS
@@ -441,7 +441,7 @@ is_function() {
 success_or_log() {
   : args: command_to_run args_to_cmd
   : runs input as a command silencing stdout, and logs stdin+stdout if failed
-  : use "success_or_log ..cmd || return" on log failures on critical steps
+  : use "success_or_log ..cmd || return" to log failures on critical steps
   :
   result="$($@ 2> >(tee /dev/fd/2))"
   code=$?
@@ -462,7 +462,7 @@ failure_or_show() {
   code=$?
   if ((code)); then
     err_msg="$(< $err_tf)"
-    LS=$code err ${funcstack[2]} $err_msg
+    LS=$code _log_msg "[ERROR: $@] $err_msg"
     return 1
   else
     echo $output
@@ -482,9 +482,9 @@ log_stderr() {
   code=$?
   err_msg="$(< $err_tf)"
   if ((code > 0)); then
-    LS=$code err ${funcstack[2]} $err_msg
+    LS=$code _log_msg "[ERROR: $@] $err_msg"
   else
-    LS=$code info ${funcstack[2]} $err_msg
+    LS=$code _log_msg "[INFO: $@] $err_msg"
   fi
 }
 
@@ -517,11 +517,12 @@ __truncate_right() {
   fi
 }
 
+# note: special chars like ｜ can mess up the alignment
 __truncate_left() {
   local text=$1
   local width=$2
-  if (( $(__get_visible_length $text) > width )); then
-    print -n -- "…${text:$(($#text-width+1))}"
+  if (( $#text > width )); then
+    print -n -- "…${text:$(( $#text - width + 1 ))}"
   else
     printf "%*s" $width $text
   fi
@@ -796,12 +797,10 @@ __begin_pp() {
       {
         __read_args $STAGE
 
-        INPUT=($INPUT)
-        if dest="$(pp_$method $INPUT)"; then
-          exec {pp} > $1
-          __submit_pp $dest $rest
-          exec {pp}>&-
-        fi
+        exec {pp} > $1
+        pp_$method $INPUT |
+          __submit_pp "$rest"
+        exec {pp}>&-
       } &
     else
       internal_err InvalidPostprocessingMethod "(Method: $method) for (Input: $INPUT)"
@@ -811,22 +810,23 @@ __begin_pp() {
 }
 
 __submit_pp() {
-  # Args: dest (created filename) [method]
+  # Stdin: Artifacts, 1 per line
+  # Args: [method]
   while IFS= read -r dest; do
     # End processing and output when there remain no more methods
-    if [[ -z $2 ]]; then
+    if [[ -z $1 ]]; then
       [[ -n $dest ]] && echo $dest
     else
       # Continue processing if not marked as skipped
       if [[ $dest != "# "* && -n $dest ]]; then
           [[ $dest == *$'\0'* ]] &&
           err InvalidName "Files cannot contain null characters ($dest)" ||
-          echo $dest$'\0'$2$'\0'$TARGET$'\0'$((++STAGE)) >&$pp
+          echo $dest$'\0'$1$'\0'$TARGET$'\0'$((++STAGE)) >&$pp
       fi
     fi
 
-    _log_dest "$dest" "$2"
-  done <<< $1
+    _log_dest "$dest" "$1"
+  done
 }
 
 ### BEGIN LOGIC
@@ -1087,7 +1087,8 @@ _log_dest() {
   dest=${1/#$HOME/~}
 
   [[ -z $INPUT ]] &&
-  args=$ARGS_ALL
+  args=$ARGS_ALL ||
+  args=""
 
   if [[ -n $2 ]]; then
     LS=-1
