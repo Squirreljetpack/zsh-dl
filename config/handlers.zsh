@@ -98,9 +98,10 @@ http.git() {
     if [[ $ref_path == refs/heads/* ]]; then
       branch=${ref_path#refs/heads/}
       infovar branch
-      args+=(--branch $branch)
+      ARGS+=(--branch $branch)
     fi
-    ssh.clone git@$root ${user_repo%.git}.git
+    ssh.clone git@$root ${user_repo%.git}.git ||
+    git clone $ARGS https://$root/${user_repo%.git}
     return
   fi
 
@@ -126,6 +127,8 @@ http.git() {
     lt -m $temp_dir/${subdir} $dest >/dev/null
     rm -r $temp_dir
     echo $dest:t
+  else
+    return 1
   fi
 }
 

@@ -269,7 +269,7 @@ ssh.default() {
   : output: successfully created files, one per line
   :
   read_dest ssh $2  || return 0
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return 1 # -u does an update in case we decided to keep the target, :h is due to rsync always copies into directories
+  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return # -u does an update in case we decided to keep the target, :h is due to rsync always copies into directories
   echo $dest
 }
 
@@ -869,7 +869,7 @@ __input() {
       fi
     fi
   } | __lg_filter_skipped | {
-    if [[ -n $ZSHDL_QUEUE_FILE ]]; then
+    if $ZSHDL_USE_QUEUE; then
       __queue_input
     else
       cat
@@ -924,7 +924,7 @@ __queue_input() {
       ((VERBOSE > 2)) && print $line >&2
     fi
 
-    __remove_queue_marker
+    __remove_queue_marker || err "Missing queue file @ $ZSHDL_QUEUE_FILE"
     ((CURRENT_LINE++))
     printf "$ZSHDL_QUEUE_MARKER$CURRENT_LINE" >> $ZSHDL_QUEUE_FILE
   done
@@ -978,6 +978,7 @@ __lg_filter_skipped() {
   fi
 }
 
+# todo: clear logs matching input glob
 __clear_logs() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log_entries "Database not found: $ZSHDL_DB"
@@ -1250,7 +1251,6 @@ __edit_config() {
 
   ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $file
   __check_config
-  exit $?
 }
 
 __display_api() {
@@ -1376,7 +1376,8 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 : ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
 ZSHDL_DB=$ZSHDL_STATE_DIR/log.db
 : ${ZSHDL_CONFIG_DIR:=$HOME/.config/zsh-dl}
-
+: ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
+[[ $ZSHDL_USE_QUEUE == (true|false) ]] || ZSHDL_USE_QUEUE=false
 ### ARGPARSE
 
 usage() {
@@ -1399,8 +1400,7 @@ Options:
   --from [log_id=0] : Retry failed downloads.
   -s                : Skip inputs which succeded in the past.
   -v                : Set verbosity 2.
-  --queue [file]    : Append input to and read from queue file.
-                        If \$ZSHDL_QUEUE_FILE is set, this option is automatically true.
+  --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
@@ -1440,9 +1440,8 @@ EOF
   (($#)) && exit $1
 }
 
-SHOWEDIT=false
-SHOWLOG=false
 SHOWHELP=false
+CLEAR_LOGS=false
 RETRY_FROM=0
 RETRY=1
 SCRIPT="$(readlink -f -- "$0")"
@@ -1451,7 +1450,7 @@ ZSHDL_VARIANT=DEFAULT
 
 TARGET=
 INPUT=
-CLEAR_LOGS=
+MODE=
 LOG_FILTER=
 
 new_args=()
@@ -1474,19 +1473,17 @@ while [[ $# -gt 0 ]]; do
       fi
       ;|
     --clear)
-      __clear_logs
-      exit
+      CLEAR_LOGS=true
       ;;
     --queue)
       if ! $_posargs; then
         if [[ $2 != -* ]]; then
           ZSHDL_QUEUE_FILE=$2
           shift
-          continue
-        else
-          : ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
-        fi
+        fi  
+        ZSHDL_USE_QUEUE=true
         have ex || fatal_err "ex is required for -q"
+        continue
       fi
       ;|
     --verbose)
@@ -1501,7 +1498,7 @@ while [[ $# -gt 0 ]]; do
         continue
       fi
       ;|
-    --)
+    --|:)
       _posargs=true
       ;|
     *)
@@ -1520,13 +1517,14 @@ while getopts "hlevc:r:sqx:" opt; do
             CONFIG=($ZSHDL_CONFIG_DIR/$OPTARG*.ini)
             ;;
         e)
-            SHOWEDIT=true
+            MODE=EDIT
             ;;  
         s)
             ZSHDL_SKIP=true
             ;;
         q)
-            : ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
+            ZSHDL_USE_QUEUE=true
+            have ex || fatal_err "ex is required for -q"
             ;;
         v)
             VERBOSE=2
@@ -1535,10 +1533,13 @@ while getopts "hlevc:r:sqx:" opt; do
             SHOWHELP=true
             ;;
         l)
-            SHOWLOG=true
+            MODE=LOGS
             ;;
         x)
             INPUTS+=($OPTARG)
+            ;;
+        :)
+          break
             ;;
         *)
             usage 1
@@ -1546,26 +1547,33 @@ while getopts "hlevc:r:sqx:" opt; do
     esac
 done
 
-$SHOWHELP && usage 0
 shift $((OPTIND - 1))
 
+$SHOWHELP && usage 0
 
 ### BEGIN
 __read_config $CONFIG
 
+$CLEAR_LOGS && __clear_logs $@
+
 export ARGS_ALL="${(j. .)${(@qq)@}}"
 
-if $SHOWLOG; then
-  __parse_log_args $@
-  if (($#log_args)); then
-    __show_log_entries $log_args
-  else
-    __show_log
-  fi
-  exit
-fi
 
-$SHOWEDIT && __edit_config $CONFIG
+case $MODE in
+  LOGS)
+    __parse_log_args $@
+    if (($#log_args)); then
+      __show_log_entries $log_args
+    else
+      __show_log
+    fi
+    exit
+    ;;
+  EDIT)
+    __edit_config $CONFIG
+    exit
+    ;;
+esac
 
 # Begin
 LG="$(__mkpipe dl_lg)"

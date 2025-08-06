@@ -5,7 +5,6 @@
 The tool itself doesn't actually do any downloading or processing. Instead, it's a purely logical framework for defining whatever tree/case-type logic you may have for your input. But it makes defining handlers and invoking them simple and easy.
 
 ```zsh
-
 dl "https://github.com/Squirreljetpack/zsh-dl/tree/main/config" # downloads the folder into your current directory
 
 # with clipboard content: https://www.reddit.com/r/proceduralgeneration/comments/1g5xi6j/a_skull_made_in_a_pixel_shader_no_mesh_no/
@@ -20,9 +19,7 @@ dl -ca "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_
 
 https://github.com/user-attachments/assets/55a36923-0bad-48fe-bc76-a382834af399
 
-
 ## Key Features
-
 
 ### 🚀 Plug and Play
 
@@ -33,12 +30,12 @@ https://github.com/user-attachments/assets/55a36923-0bad-48fe-bc76-a382834af399
   - Project Gutenberg books (auto-convert to Markdown)
 
   - Media downloads (images/videos/audio)[^1]
-  
+
   - Multithreaded, chunked and resumable downloads
-  
+
 - Post-processors for formatting and conversion:
   - Markdown conversion
-  
+
   - Define your own universal formatter
 
 - Reads from your clipboard for minimal fuss
@@ -65,14 +62,12 @@ ZSHDL_THREADS=5 # 5 download threads
 ```
 
 ```shell
-
 # Run with
 dl -x "https://jless.io/user-guide"
 # or
 dl < urls.txt
 # or just
 dl # read from your clipboard
-
 ```
 
 ### 🧩 Elegant Extension System
@@ -99,11 +94,13 @@ file.fmt_ruff() {
   ruff format $opts $1
 }
 ```
+
 ```ini
 # config/fmt.ini
 file.fmt_ruff="*.py" # handle python files with fmt_ruff
 file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 ```
+
 ```shell
 # format all your files with strict settings
 > FORMAT=strict dl --config fmt *
@@ -116,8 +113,6 @@ file.fmt_biome="*.(js|ts|tsx|jsx|astro|html|css)"
 
 See [Configuration](#handlers-and-preprocessors) for the actual inputs provided to and outputs expected of these handlers.
 
-
-
 ### 📊 Robust Logging & Statistics
 
 - SQLite database tracks history per config
@@ -125,7 +120,6 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 - Skip past executions
 
 - Retry failed downloads
-
 
 ```shell
 > dl -s
@@ -136,7 +130,6 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 │ 2  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │                                          │   ~/SCRIPTS/zsh-dl/search.md │  3   │
 │ 1  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │ [PP: markdown] invoked for /home/usern/… │ ~/SCRIPTS/zsh-dl/search.html │  0   │
 └────┴────────────────┴──────────────────────────────────────────┴──────────────────────────────────────────┴──────────────────────────────┴──────┘
-
 ```
 
 ### 📋 Task management
@@ -144,7 +137,6 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 - Queue your input, cancel anytime, and resume where you left off
 
 - More on the way
-
 
 # Installation
 
@@ -163,9 +155,11 @@ zsh-dl relies on the following external command-line tools. Certain functionalit
 - [lt](https://github.com/Squirreljetpack/lt): For determining download destination.
 - [sqlite3](https://www.sqlite.org/download.html): For logging.
 - clipboard commands (xclip/pbcopy[^3]): For reading from clipboard.
+
 [^3]: preinstalled on Mac
 
 You surely already have these:
+
 - curl: For HTTP/HTTPS downloads.
 - rsync: For SSH/SFTP transfers.
 - git: For cloning repositories.
@@ -173,11 +167,11 @@ You surely already have these:
 - file: For determining file and MIME types.
 
 And the predefined handlers/postprocessors are just wrappers around these:
-   - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-   - [gallery-dl](https://github.com/mikf/gallery-dl)
-   - [html2markdown](https://github.com/JohannesKaufmann/html-to-markdown)
-   - [Ruff](https://github.com/astral-sh/ruff) / [Biome](https://github.com/biomejs/biome) / [shellfmt](https://github.com/mvdan/sh)
-   
+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [gallery-dl](https://github.com/mikf/gallery-dl)
+- [html2markdown](https://github.com/JohannesKaufmann/html-to-markdown)
+- [Ruff](https://github.com/astral-sh/ruff) / [Biome](https://github.com/biomejs/biome) / [shellfmt](https://github.com/mvdan/sh)
 
 All these can be easily reconfigured through setting variables or writing a handler.
 
@@ -241,9 +235,11 @@ Status codes:
 Configuration is read from `ZSHDL_CONFIG_DIR`, defaulting to `~/.config/zsh-dl`.
 
 ### Handlers and Preprocessors
+
 See `dl -v --help`
 
 ### Configs
+
 - Glob patterns:
   - Define a handler and optional postprocessor for an input pattern like so:
     - `handler(:processor)="*" # comments are allowed`
@@ -262,7 +258,6 @@ See `dl -v --help`
     - `YTDLPcmd`
     - `IMAGESDLcmd`
 
-
 </br>
 
 - Sourcing:
@@ -270,8 +265,7 @@ See `dl -v --help`
   - For convenience, configs can be invoked with `-c <nickname>` where `<nickname>` is any string such that there is only one config that has it as an initial substring.
   - Before running, all corresponding `<name>_*.zsh` files along with the preinstalled `handlers.zsh` and `postprocessors.zsh` in the config directory are sourced.
 
-
-# Future directions [^4] 
+# Future directions [^4]
 
 - Use a more powerful expression language than glob
 - Advanced mime detection
