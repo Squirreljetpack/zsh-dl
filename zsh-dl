@@ -269,7 +269,7 @@ ssh.default() {
   : output: successfully created files, one per line
   :
   read_dest ssh $2  || return 0
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return 1 # -u does an update in case we decided to keep the target, :h is due to rsync always copies into directories
+  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return # -u does an update in case we decided to keep the target, :h is due to rsync always copies into directories
   echo $dest
 }
 
@@ -460,9 +460,10 @@ failure_or_show() {
   trap 'rm $err_tf' EXIT
   output="$($@ 2> >(tee $err_tf >&2))"
   code=$?
+  [[ -n $err_msg ]] || return
   if ((code)); then
     err_msg="$(< $err_tf)"
-    LS=$code _log_msg "[ERROR: $@] $err_msg"
+    LS=$code _log_msg "[ERROR: $*] $err_msg"
     return 1
   else
     echo $output
@@ -477,14 +478,16 @@ log_stderr() {
   : outputs: same as command, but duplicates stderr to logging
   :
   err_tf="$(mktemp)"
+  dbgvar err_tf
   trap 'rm $err_tf' EXIT
   $@ 2> >(tee $err_tf >&2)
   code=$?
   err_msg="$(< $err_tf)"
+  [[ -n $err_msg ]] || return
   if ((code > 0)); then
-    LS=$code _log_msg "[ERROR: $@] $err_msg"
+    LS=$code _log_msg "[ERROR: $*] $err_msg"
   else
-    LS=$code _log_msg "[INFO: $@] $err_msg"
+    LS=$code _log_msg "[INFO: $*] $err_msg"
   fi
 }
 
@@ -541,7 +544,7 @@ _get_LS_color() {
 }
 
 __parse_log_args() {
-  typeset -ga log_args
+  typeset -ga LOG_ARGS
   status_filters=()
   for param; do
     case $param in
@@ -549,7 +552,7 @@ __parse_log_args() {
         status_filters+=${1#.}
         ;;
       [0-9]#(:|))
-        log_args+=($param)
+        LOG_ARGS+=($param)
         ;;
       *)
         warn InvalidArg "$param is invalid, skipping."
@@ -620,7 +623,8 @@ __show_log_entries() {
   query=""
 
   if [[ "$1" =~ ^([0-9]+):$ ]]; then
-    query="SELECT * FROM ($base_select ORDER BY id DESC LIMIT ${1%:}) sub ORDER BY sub.id ASC;"
+    query="SELECT * FROM ($base_select WHERE id >= ${1%:} ORDER BY id ASC) sub ORDER BY sub.id ASC;"
+    # query="SELECT * FROM ($base_select ORDER BY id DESC LIMIT ${1%:}) sub ORDER BY sub.id ASC;"
 
   elif [[ "$1" == ":" ]]; then
     query="$base_select ORDER BY id ASC;"
@@ -661,7 +665,7 @@ __show_log_entries() {
     
     if [[ -n "${log_dest# }" ]]; then
         print "  Destination:"
-        print -r -- "${log_dest}" | sed -e 's/^/    /' -e 's/ \\\\ /\n/'
+        print -r -- "${log_dest}" | sed -e 's/^/    /'
     elif [[ -n "${log_msg# }" ]]; then
         print "  Message:"
         print -r -- "${log_msg}" | sed 's/^/    /'
@@ -864,12 +868,14 @@ __input() {
     else
       if [ -t 0 ]; then
         echo "$(${=PASTEcmd})" # buffer
+      elif $ZSHDL_ITER_ARGS; then
+        print -rl -- $@
       else
         cat
       fi
     fi
   } | __lg_filter_skipped | {
-    if [[ -n $ZSHDL_QUEUE_FILE ]]; then
+    if $ZSHDL_USE_QUEUE; then
       __queue_input
     else
       cat
@@ -924,7 +930,7 @@ __queue_input() {
       ((VERBOSE > 2)) && print $line >&2
     fi
 
-    __remove_queue_marker
+    __remove_queue_marker || err "Missing queue file @ $ZSHDL_QUEUE_FILE"
     ((CURRENT_LINE++))
     printf "$ZSHDL_QUEUE_MARKER$CURRENT_LINE" >> $ZSHDL_QUEUE_FILE
   done
@@ -978,6 +984,7 @@ __lg_filter_skipped() {
   fi
 }
 
+# todo: clear logs matching input glob
 __clear_logs() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log_entries "Database not found: $ZSHDL_DB"
@@ -1022,6 +1029,7 @@ __begin_lg() {
 
     if [[ -n $_msg ]]; then
       _msg="'${_msg//\'/"''"}'"
+      _msg="${_msg//" \\\\\ "/$'\n'}"
     else
       _msg=NULL
     fi
@@ -1029,6 +1037,7 @@ __begin_lg() {
     _dest=${_dest#"# "}
     if [[ -n $_dest ]]; then
       _dest="'${_dest//\'/"''"}'"
+      _dest="${_msg//" \\\\\ "/$'\n'}"
       _directory="'${PWD//\'/"''"}'"
     else
       _dest=NULL
@@ -1052,13 +1061,14 @@ __begin_lg() {
 }
 
 _log_msg() {
-  [[ -z $LS || -z $TARGET || -z $1 ]] && return 1 # only run outside of thread
+  [[ -z $LS || -z $TARGET ]] && return 1 # only run outside of thread
   if [[ $TARGET$INPUT == *$'\n'* ]]; then
     internal_err "Logging failed: Target ($TARGET) or Input ($INPUT) contains newlines"
     return
   fi
 
-  msg=${${1%%$'\n'##}//$'\n'/' \\\\ '}
+  msg=${${1%%[[:space:]]##}//$'\n'/' \\\\\ '}
+  [[ -z $msg ]] && return 1
   print -r -- $LS$'\0'$TARGET$'\0'$msg$'\0'"# "$'\0'$INPUT >&$lg
 }
 
@@ -1241,7 +1251,7 @@ __edit_config() {
     printf "Enter log ids: "
     read -r line
     __parse_log_args $=line
-    __delete_log_entries $log_args
+    __delete_log_entries $LOG_ARGS
   else
     file=${ZSHDL_CONFIG_FILES[$((i-2))]}
   fi
@@ -1250,7 +1260,6 @@ __edit_config() {
 
   ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $file
   __check_config
-  exit $?
 }
 
 __display_api() {
@@ -1372,25 +1381,29 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 : ${ZSHDL_OUTPUT_DIR:=./}
 : ${ZSHDL_LOG_DISPLAY_LIMIT:=50}
 : ${ZSHDL_MAX_QUEUE_SIZE:=500}
+[[ $ZSHDL_ITER_ARGS == (true|false) ]] || ZSHDL_ITER_ARGS=false
 
 : ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
 ZSHDL_DB=$ZSHDL_STATE_DIR/log.db
 : ${ZSHDL_CONFIG_DIR:=$HOME/.config/zsh-dl}
-
+: ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
+[[ $ZSHDL_USE_QUEUE == (true|false) ]] || ZSHDL_USE_QUEUE=false
 ### ARGPARSE
 
 usage() {
   ((VERBOSE>1)) && __display_api
 
   cat <<EOF
-Usage: $PROG [-hlesvq] [-c name] [-r count] [-x input] […log_ids]
+Usage: $PROG [config] [-hlesvq] [-r count] [-x input] […log_ids]
 
 Extensible cli download tool.
 
+Subcommands:
+  config            : Use <config|DEFAULT>.ini in $ZSHDL_CONFIG_DIR as the config.
+                        A unique prefix can be specified.
 Options:
   -x <input>        : Process <input> instead of reading from stdin/clipboard.
                         Can be specified multiple times.
-  -c <name>         : Use name.ini in $ZSHDL_CONFIG_DIR as the config.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
   -l […log_ids]     : Show the log for the given log_ids.
@@ -1399,8 +1412,7 @@ Options:
   --from [log_id=0] : Retry failed downloads.
   -s                : Skip inputs which succeded in the past.
   -v                : Set verbosity 2.
-  --queue [file]    : Append input to and read from queue file.
-                        If \$ZSHDL_QUEUE_FILE is set, this option is automatically true.
+  --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
@@ -1440,9 +1452,8 @@ EOF
   (($#)) && exit $1
 }
 
-SHOWEDIT=false
-SHOWLOG=false
 SHOWHELP=false
+CLEAR_LOGS=false
 RETRY_FROM=0
 RETRY=1
 SCRIPT="$(readlink -f -- "$0")"
@@ -1451,11 +1462,17 @@ ZSHDL_VARIANT=DEFAULT
 
 TARGET=
 INPUT=
-CLEAR_LOGS=
+MODE=
 LOG_FILTER=
 
 new_args=()
 _posargs=false
+
+if [[ -n $1 && $1 != -* ]]; then
+  CONFIG=($ZSHDL_CONFIG_DIR/$1*.ini)
+  shift 1
+fi
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     --help)
@@ -1474,19 +1491,17 @@ while [[ $# -gt 0 ]]; do
       fi
       ;|
     --clear)
-      __clear_logs
-      exit
+      CLEAR_LOGS=true
       ;;
     --queue)
       if ! $_posargs; then
         if [[ $2 != -* ]]; then
           ZSHDL_QUEUE_FILE=$2
           shift
-          continue
-        else
-          : ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
-        fi
+        fi  
+        ZSHDL_USE_QUEUE=true
         have ex || fatal_err "ex is required for -q"
+        continue
       fi
       ;|
     --verbose)
@@ -1501,7 +1516,7 @@ while [[ $# -gt 0 ]]; do
         continue
       fi
       ;|
-    --)
+    --|:)
       _posargs=true
       ;|
     *)
@@ -1514,19 +1529,17 @@ set -- "${new_args[@]}"
 
 
 INPUTS=()
-while getopts "hlevc:r:sqx:" opt; do
+while getopts "hlevr:sqx:" opt; do
     case "$opt" in
-        c)
-            CONFIG=($ZSHDL_CONFIG_DIR/$OPTARG*.ini)
-            ;;
         e)
-            SHOWEDIT=true
+            MODE=EDIT
             ;;  
         s)
             ZSHDL_SKIP=true
             ;;
         q)
-            : ${ZSHDL_QUEUE_FILE:=$ZSHDL_STATE_DIR/queue_CONFIG}
+            ZSHDL_USE_QUEUE=true
+            have ex || fatal_err "ex is required for -q"
             ;;
         v)
             VERBOSE=2
@@ -1535,10 +1548,13 @@ while getopts "hlevc:r:sqx:" opt; do
             SHOWHELP=true
             ;;
         l)
-            SHOWLOG=true
+            MODE=LOGS
             ;;
         x)
             INPUTS+=($OPTARG)
+            ;;
+        :)
+          break
             ;;
         *)
             usage 1
@@ -1546,26 +1562,33 @@ while getopts "hlevc:r:sqx:" opt; do
     esac
 done
 
-$SHOWHELP && usage 0
 shift $((OPTIND - 1))
 
+$SHOWHELP && usage 0
 
 ### BEGIN
 __read_config $CONFIG
 
-export ARGS_ALL="${(j. .)${(@qq)@}}"
+$CLEAR_LOGS && __clear_logs $@
 
-if $SHOWLOG; then
-  __parse_log_args $@
-  if (($#log_args)); then
-    __show_log_entries $log_args
-  else
-    __show_log
-  fi
-  exit
-fi
+$ZSHDL_ITER_ARGS || export ARGS_ALL="${(j. .)${(@qq)@}}"
 
-$SHOWEDIT && __edit_config $CONFIG
+
+case $MODE in
+  LOGS)
+    __parse_log_args $@
+    if (($#LOG_ARGS)); then
+      __show_log_entries $LOG_ARGS
+    else
+      __show_log
+    fi
+    exit
+    ;;
+  EDIT)
+    __edit_config $CONFIG
+    exit
+    ;;
+esac
 
 # Begin
 LG="$(__mkpipe dl_lg)"

@@ -7,7 +7,6 @@
 
 pp_markdown() {
   read_dest file $1:r.md -a || return 0
-  print -u2 
   success_or_log ${=HTML2MARKDOWNcmd} --output $dest < $1 || return
   echo $dest && rm $1
 }

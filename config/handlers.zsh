@@ -1,19 +1,6 @@
 ####### HTTP #######
 # Args: url, params
 
-http.info() {
-  url=$1
-  params=$2
-  [[ -n $params ]] && params="?$params" # alternatively, just use $TARGET for the original line, see below
-
-  exec >&2
-  if have httpstat; then
-    httpstat "$url$params"
-  else
-    curl -sI "$url$params"
-  fi
-}
-
 # Example:
 # If dl recieves:                https://www.google.com/search?q=example
 # Then http.handlers are passed: www.google.com/search, q=example
@@ -42,7 +29,8 @@ http.ytdlp() {
     --print after_move:filepath \
     -o "%(title)s.%(ext)s" \
     $ARGS \
-    $TARGET
+    $TARGET |
+    awk '!seen[$0]++'
 }
 
 http.images() {
@@ -60,7 +48,8 @@ http.ytdlp_audio() {
     --print after_move:filepath \
     -o "%(title)s.%(ext)s" \
     $ARGS \
-    $TARGET
+    $TARGET |
+    awk '!seen[$0]++'
 }
 
 # Example of fallback to image download if no video present i.e. reddit posts
@@ -68,7 +57,6 @@ http.dl() {
   failure_or_show http.ytdlp $@ ||
   failure_or_show http.images $@
 }
-
 
 # Downloads folders, images, or single branches of repositories from
 # github/gitlab/huggingface. Only github is fully supported.
@@ -80,7 +68,7 @@ http.git() {
   base=${${1%%/$~sep/*}#*://}
   root=${${base#*://}:h1}
   user_repo=${base#*/}
-
+  [[ $user_repo == */* ]] || return
 
   # main/src, (/-)/tree/, 
   rest=${1#*/$~sep/}
@@ -98,9 +86,13 @@ http.git() {
     if [[ $ref_path == refs/heads/* ]]; then
       branch=${ref_path#refs/heads/}
       infovar branch
-      args+=(--branch $branch)
+      ARGS+=(--branch $branch)
     fi
-    ssh.clone git@$root ${user_repo%.git}.git
+    ssh.clone git@$root ${user_repo%.git}.git || {
+      read_dest file $user_repo || return 0
+      success_or_log git clone $ARGS https://$root/$user_repo $dest || return
+      echo $dest
+    }
     return
   fi
 
@@ -126,16 +118,14 @@ http.git() {
     lt -m $temp_dir/${subdir} $dest >/dev/null
     rm -r $temp_dir
     echo $dest:t
+  else
+    return 1
   fi
 }
 
 
 ####### SSH #######
 # Args: userhost, subpath
-
-ssh.info() {
-  ssh -vT $1 >&2
-}
 
 ssh.clone() {
   read_dest ssh $2 || return 0 # read_dest provides a valid destination path to the dest variable given the path-like component corresponding to the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
@@ -155,11 +145,6 @@ file.walk() {
   else
     handle_file $f
   fi
-}
-
-file.info() {
-  file -L $1 >&2
-  echo $1
 }
 
 file.fmt_py() {
