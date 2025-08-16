@@ -229,7 +229,7 @@ __read_args() {
   done
   splitat=${_args[(ie):]}
   ((splitat)) && ARGS=(${_args::$((splitat-1))}) || ARGS=($_args)
-  dbgvar ARGS
+  [[ -n $ARGS ]] && info ARGS
 }
 
 
@@ -269,8 +269,9 @@ ssh.default() {
   : output: successfully created files, one per line
   :
   read_dest ssh $2  || return 0
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:$2 $dest:h || return # -u does an update in case we decided to keep the target, :h is due to rsync always copies into directories
-  echo $dest
+  [[ -d $dest ]] && dest=$dest:t
+  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:${(@qq)2} $dest || return # -u does an update in case we decided to keep the target, :t is due to rsync always copies into directories
+  [[ -e $dest ]] && echo $dest
 }
 
 file.default() {
@@ -306,7 +307,7 @@ na.na() {
 ## Getters
 
 read_dest() {
-  : arg: protocol '<a path-like string>' '[...lt_args]'
+  : args: proto '<a path-like string>' '[...lt_args]'
   : output: 'stores <a valid destination for $2> into the variable dest, otherwise returns 1 and outputs "# " (logs the task as skipped)'
   : notes: 'Prompts the user in case of conflict. Ex.' 'read_dest file $1:r.md -a && echo $dest || return 0'
   :
@@ -1097,8 +1098,8 @@ _log_dest() {
   dest=${1/#$HOME/~}
 
   [[ -z $INPUT ]] &&
-  args=$ARGS_ALL ||
-  args=""
+  _args=$ARGS_ALL ||
+  _args=""
 
   if [[ -n $2 ]]; then
     LS=-1
@@ -1110,7 +1111,7 @@ _log_dest() {
     print -u2 -- "${fg[green]}[Complete]${reset_color} $dest"
   fi
 
-  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'"$dest"$'\0'$INPUT$'\0'$args >&$lg
+  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'"$dest"$'\0'$INPUT$'\0'$_args >&$lg
 }
 
 __finish_lg() {
@@ -1468,7 +1469,7 @@ LOG_FILTER=
 new_args=()
 _posargs=false
 
-if [[ -n $1 && $1 != -* ]]; then
+if [[ -n $1 && $1 != -* && $1 != : ]]; then
   CONFIG=($ZSHDL_CONFIG_DIR/$1*.ini)
   shift 1
 fi
@@ -1529,7 +1530,7 @@ set -- "${new_args[@]}"
 
 
 INPUTS=()
-while getopts "hlevr:sqx:" opt; do
+while getopts "hlevr:sqx:-" opt; do
     case "$opt" in
         e)
             MODE=EDIT
@@ -1553,8 +1554,8 @@ while getopts "hlevr:sqx:" opt; do
         x)
             INPUTS+=($OPTARG)
             ;;
-        :)
-          break
+        -|:|'')
+            break
             ;;
         *)
             usage 1

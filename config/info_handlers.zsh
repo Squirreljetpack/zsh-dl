@@ -28,6 +28,8 @@ http.git_info() {
 
   out="$(mktemp -d)"
 
+  (($#ARGS)) || ARGS=(--depth 1) 
+
   success_or_log git clone $ARGS https://$root/${user_repo%.git} $out || return
   {
     cd $out
