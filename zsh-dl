@@ -1038,7 +1038,7 @@ __begin_lg() {
     _dest=${_dest#"# "}
     if [[ -n $_dest ]]; then
       _dest="'${_dest//\'/"''"}'"
-      _dest="${_msg//" \\\\\ "/$'\n'}"
+      _dest="${_dest//" \\\\\ "/$'\n'}"
       _directory="'${PWD//\'/"''"}'"
     else
       _dest=NULL
@@ -1111,7 +1111,7 @@ _log_dest() {
     print -u2 -- "${fg[green]}[Complete]${reset_color} $dest"
   fi
 
-  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'"$dest"$'\0'$INPUT$'\0'$_args >&$lg
+  print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'$dest$'\0'$INPUT$'\0'$_args >&$lg
 }
 
 __finish_lg() {
@@ -1395,7 +1395,7 @@ usage() {
   ((VERBOSE>1)) && __display_api
 
   cat <<EOF
-Usage: $PROG [config] [-hlesvq] [-r count] [-x input] […log_ids]
+Usage: $PROG [config] [-hlesvq] [-r count] [- input] […log_ids]
 
 Extensible cli download tool.
 
@@ -1403,7 +1403,7 @@ Subcommands:
   config            : Use <config|DEFAULT>.ini in $ZSHDL_CONFIG_DIR as the config.
                         A unique prefix can be specified.
 Options:
-  -x <input>        : Process <input> instead of reading from stdin/clipboard.
+  - <input>        : Process <input> instead of reading from stdin/clipboard.
                         Can be specified multiple times.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
@@ -1426,15 +1426,15 @@ Environment variables and configuration:
 Examples:
   $PROG
     Parses clipboard for urls to download
-  $PROG -x "https://gutenberg.org/ebooks/76257"
+  $PROG - "https://gutenberg.org/ebooks/76257"
     Download book #76257 as a markdown file
-  $PROG -x "https://github.com/sumoduduk/terminusdm/tree/main/src"
+  $PROG - "https://github.com/sumoduduk/terminusdm/tree/main/src"
     Download the src/ folder of the sumoduduk/terminusdm in the main branch to the current directory
-  $PROG -x "user@host:path/to/your/file.tx"
+  $PROG - "user@host:path/to/your/file.tx"
     Downloads over SSH
-  $PROG -ci -x "google.com"
+  $PROG -ci - "google.com"
     Gets info about a URL/file
-  $PROG -cf -x "path/to/your/script.zsh" -x "random_weather.py"
+  $PROG -cf - "path/to/your/script.zsh" - "random_weather.py"
     Format local files using the fmt.ini config
   $PROG -ca --queue urls.txt
     Download audio from a list of youtube urls (with alternate.ini)
@@ -1517,6 +1517,14 @@ while [[ $# -gt 0 ]]; do
         continue
       fi
       ;|
+    -)
+      if (($# > 1)) {
+        INPUTS+=($2)
+        shift
+      } else {
+        usage 1
+      }
+      ;;
     --|:)
       _posargs=true
       ;|
@@ -1550,9 +1558,6 @@ while getopts "hlevr:sqx:-" opt; do
             ;;
         l)
             MODE=LOGS
-            ;;
-        x)
-            INPUTS+=($OPTARG)
             ;;
         -|:|'')
             break

@@ -11,7 +11,7 @@ In my daily use, it usually feels something like a context-dependent amalgamatio
 
 ```zsh
 # downloads the folder into your current directory
-dl -x "https://github.com/Squirreljetpack/zsh-dl/tree/main/config"
+dl - "https://github.com/Squirreljetpack/zsh-dl/tree/main/config"
 
 # Reads from clipboard:
 # https://www.reddit.com/r/proceduralgeneration/comments/1g5xi6j/a_skull_made_in_a_pixel_shader_no_mesh_no/
@@ -19,9 +19,9 @@ dl # a_skull_made_in_a_pixel_shader_-_no_mesh_no_geometry_just_code.mkv
 
 # The unique prefix of a config acts as a subcommand/mode switch
 # The following are ruled by alternate.ini:
-dl a -x "https://www.youtube.com/watch?v=l5ihnPWKJZU" # Downloads audio
+dl a - "https://www.youtube.com/watch?v=l5ihnPWKJZU" # Downloads audio
 # Downloads images (would be video without 'a')
-dl a -x "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/"
+dl a - "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/"
 ```
 
 [^1]: Currently, by parsing input according to protocol, and then matching the parsed data with globs.
@@ -72,7 +72,7 @@ ZSHDL_THREADS=5 # 5 download threads
 
 ```shell
 # Run with
-dl -x "https://jless.io/user-guide"
+dl - "https://jless.io/user-guide"
 # or
 dl < urls.txt
 # or just
@@ -185,7 +185,7 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-Usage: dl [config] [-hlesvq] [-r count] [-x input] […log_ids]
+Usage: dl [config] [-hlesvq] [-r count] [- input] […log_ids]
 
 Extensible cli download tool.
 
@@ -193,7 +193,7 @@ Subcommands:
   config            : Use <config|DEFAULT>.ini in /home/archr/.config/zsh-dl as the config.
                         A unique prefix can be specified instead as well.
 Options:
-  -x <input>        : Process <input> instead of reading from stdin/clipboard.
+  - <input>        : Process <input> instead of reading from stdin/clipboard.
                         Can be specified multiple times.
   -e                : Edit configuration files.
   -h                : Display this help message and exit.
@@ -216,15 +216,15 @@ Environment variables and configuration:
 Examples:
   dl
     Parses clipboard for urls to download
-  dl -x "https://gutenberg.org/ebooks/76257"
+  dl - "https://gutenberg.org/ebooks/76257"
     Download book #76257 as a markdown file
-  dl -x "https://github.com/sumoduduk/terminusdm/tree/main/src"
+  dl - "https://github.com/sumoduduk/terminusdm/tree/main/src"
     Download the src/ folder of the sumoduduk/terminusdm in the main branch to the current directory
-  dl -x "user@host:path/to/your/file.tx"
+  dl - "user@host:path/to/your/file.tx"
     Downloads over SSH
-  dl i -x "google.com"
+  dl i - "google.com"
     Gets info about a URL/file
-  dl f -x "path/to/your/script.zsh" -x "random_weather.py"
+  dl f - "path/to/your/script.zsh" - "random_weather.py"
     Format local files using the fmt.ini config
   dl a --queue urls.txt
     Download audio from a list of youtube urls (with alternate.ini)
