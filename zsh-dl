@@ -112,7 +112,7 @@ handle_file() {
 handle_na() {
   _read_target $1
 
-  if [[ -e $target ]]; then
+  if [[ -e $target || -L $target ]]; then
     handle_file $target
     return
   # require username
@@ -343,7 +343,7 @@ get_html_field() {
 }
 
 get_file_type() {
-  # provides a char from fdsbcxesp for file, directory, symlink, block-device, char-device, executable, empty, socket, pipe
+  : provides a char from fdsbcxesp for file, directory, symlink, block-device, char-device, executable, empty, socket, pipe
   if [[ -L $1 ]]; then
     echo "l"
   elif [[ -d $1 ]]; then
@@ -1075,7 +1075,7 @@ _log_msg() {
 
 _log_skipped() {
   # args: dest method
-  $ZSHDL_EXPLICITSKIP && [[ -z $1 ]] && return
+  $ZSHDL_NO_LOG_IMPLICIT_SKIPS && [[ -z $1 ]] && return
   ((VERBOSE)) && print -u2 -- "\033[90m[Skipped]${reset_color} ${1:-${INPUT:-${TARGET}}}"
 
   if [[ -n $2 ]]; then
@@ -1295,7 +1295,7 @@ __display_api() {
 
   fi
 
-  echo "\n### CONSTANTS ###\n"
+  echo "\n### DEFAULT CONSTANTS ###\n"
 
   for c in $CONSTANTS; do
     print -- "$c: ${(P)c}"
@@ -1364,7 +1364,7 @@ fi
 
 unset -f exportCmdVar
 
-CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_EXPLICITSKIP ZSHDL_STRIPWHITESPACE ZSHDL_QUEUE_FILE)
+CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_NO_LOG_IMPLICIT_SKIPS ZSHDL_STRIPWHITESPACE ZSHDL_QUEUE_FILE)
 
 : ${ZSHDL_CONNECT_TIMEOUT:=5}
 : ${ZSHDL_THREADS:=1}
@@ -1375,7 +1375,7 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 [[ $ZSHDL_SKIP == (true|false) ]] || ZSHDL_SKIP=false
 
 # Only log skips incurred by methods (Unprocessed inputs are not logged)
-[[ $ZSHDL_EXPLICITSKIP == (true|false) ]] || ZSHDL_EXPLICITSKIP=true
+[[ $ZSHDL_NO_LOG_IMPLICIT_SKIPS == (true|false) ]] || ZSHDL_NO_LOG_IMPLICIT_SKIPS=true
 [[ $ZSHDL_NOLOG == (true|false) ]] || ZSHDL_NOLOG=false
 [[ $ZSHDL_STRIPWHITESPACE == (true|false) ]] || ZSHDL_STRIPWHITESPACE=false
 : ${ZSHDL_FORCE_PROTO}

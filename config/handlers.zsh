@@ -161,6 +161,15 @@ file.fmt_sh() {
   failure_or_show shfmt -w $1
 }
 
+# this example demonstrates matching how matching can be done on any
+# of the inputs, as well as how to fall back to the default handler
+file.link_handler() {
+  if [[ $1 == /ARCHIVE/* || "$(readlink $1)" == /ARCHIVE/* ]]; then
+    file.default $@ # see my post https://chasingsunlight.netlify.app/posts/distributed-dropbox-with-syncthing/ for one way this handler could be used.
+  else
+    file.default $@
+  fi
+}
 
 ####### HELPER FUNCTIONS
 
