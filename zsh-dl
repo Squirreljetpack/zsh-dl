@@ -112,7 +112,7 @@ handle_file() {
 handle_na() {
   _read_target $1
 
-  if [[ -e $target ]]; then
+  if [[ -e $target || -L $target ]]; then
     handle_file $target
     return
   # require username
@@ -343,7 +343,7 @@ get_html_field() {
 }
 
 get_file_type() {
-  # provides a char from fdsbcxesp for file, directory, symlink, block-device, char-device, executable, empty, socket, pipe
+  : provides a char from fdsbcxesp for file, directory, symlink, block-device, char-device, executable, empty, socket, pipe
   if [[ -L $1 ]]; then
     echo "l"
   elif [[ -d $1 ]]; then
@@ -546,6 +546,8 @@ _get_LS_color() {
 
 __parse_log_args() {
   typeset -ga LOG_ARGS
+  LOG_FILTER=
+
   status_filters=()
   for param; do
     case $param in
@@ -560,7 +562,9 @@ __parse_log_args() {
         ;;
     esac
   done
-  (($#status_filters)) && LOG_FILTER="WHERE LS IN (${(j. .)status_filters})"
+  
+  (($#status_filters)) && LOG_FILTER="WHERE LS IN (${(j. .)status_filters})" ||
+  ((VERBOSE > 1)) || LOG_FILTER="WHERE LS >= -2" # don't show logging logs without -v
 }
 
 __delete_log_entries() {
@@ -624,7 +628,8 @@ __show_log_entries() {
   query=""
 
   if [[ "$1" =~ ^([0-9]+):$ ]]; then
-    query="SELECT * FROM ($base_select WHERE id >= ${1%:} ORDER BY id ASC) sub ORDER BY sub.id ASC;"
+    [[ -n $LOG_FILTER ]] && base_select+=" AND" || base_select+=" WHERE"
+    query="SELECT * FROM ($base_select id >= ${1%:} ORDER BY id ASC) sub ORDER BY sub.id ASC;"
     # query="SELECT * FROM ($base_select ORDER BY id DESC LIMIT ${1%:}) sub ORDER BY sub.id ASC;"
 
   elif [[ "$1" == ":" ]]; then
@@ -1075,7 +1080,7 @@ _log_msg() {
 
 _log_skipped() {
   # args: dest method
-  $ZSHDL_EXPLICITSKIP && [[ -z $1 ]] && return
+  $ZSHDL_NO_LOG_IMPLICIT_SKIPS && [[ -z $1 ]] && return
   ((VERBOSE)) && print -u2 -- "\033[90m[Skipped]${reset_color} ${1:-${INPUT:-${TARGET}}}"
 
   if [[ -n $2 ]]; then
@@ -1289,13 +1294,13 @@ __display_api() {
 
     echo "\n### Additional ###\n"
     overrides=(__read_proto_stem __read_url_params __read_target_type_mime_encoding __read_userhost_subpath __read_target)
-    for f in $api; do
+    for f in $overrides; do
       functions $f
     done
 
   fi
 
-  echo "\n### CONSTANTS ###\n"
+  echo "\n### DEFAULT CONSTANTS ###\n"
 
   for c in $CONSTANTS; do
     print -- "$c: ${(P)c}"
@@ -1364,7 +1369,7 @@ fi
 
 unset -f exportCmdVar
 
-CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_EXPLICITSKIP ZSHDL_STRIPWHITESPACE ZSHDL_QUEUE_FILE)
+CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FORCE_PROTO ZSHDL_OUTPUT_DIR ZSHDL_LOG_DISPLAY_LIMIT ZSHDL_STATE_DIR ZSHDL_CONFIG_DIR ZSHDL_SKIP ZSHDL_NOLOG ZSHDL_NO_LOG_IMPLICIT_SKIPS ZSHDL_STRIPWHITESPACE ZSHDL_QUEUE_FILE)
 
 : ${ZSHDL_CONNECT_TIMEOUT:=5}
 : ${ZSHDL_THREADS:=1}
@@ -1375,7 +1380,7 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 [[ $ZSHDL_SKIP == (true|false) ]] || ZSHDL_SKIP=false
 
 # Only log skips incurred by methods (Unprocessed inputs are not logged)
-[[ $ZSHDL_EXPLICITSKIP == (true|false) ]] || ZSHDL_EXPLICITSKIP=true
+[[ $ZSHDL_NO_LOG_IMPLICIT_SKIPS == (true|false) ]] || ZSHDL_NO_LOG_IMPLICIT_SKIPS=true
 [[ $ZSHDL_NOLOG == (true|false) ]] || ZSHDL_NOLOG=false
 [[ $ZSHDL_STRIPWHITESPACE == (true|false) ]] || ZSHDL_STRIPWHITESPACE=false
 : ${ZSHDL_FORCE_PROTO}
@@ -1410,9 +1415,10 @@ Options:
   -l […log_ids]     : Show the log for the given log_ids.
                         'n:' to display the last n logs
                         '.s' to filter by status
+                        Without -v, codes < -2 are excluded by default. 
   --from [log_id=0] : Retry failed downloads.
   -s                : Skip inputs which succeded in the past.
-  -v                : Set verbosity 2.
+  -v                : Increment verbosity.
   --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
@@ -1447,7 +1453,7 @@ Status codes:
   -2: Unhandled/Skipped
   -1: Partial Success
    0: Success
-  >0: Handling error
+ > 0: Handling error
 EOF
   
   (($#)) && exit $1
@@ -1464,7 +1470,6 @@ ZSHDL_VARIANT=DEFAULT
 TARGET=
 INPUT=
 MODE=
-LOG_FILTER=
 
 new_args=()
 _posargs=false
@@ -1551,7 +1556,7 @@ while getopts "hlevr:sqx:-" opt; do
             have ex || fatal_err "ex is required for -q"
             ;;
         v)
-            VERBOSE=2
+            ((VERBOSE+=1))
             ;;
         h)
             SHOWHELP=true
@@ -1621,7 +1626,7 @@ tasks=()
 
 
 __input $@ | {
-$ZSHDL_STRIPWHITESPACE && IFS=
+$ZSHDL_STRIPWHITESPACE || IFS=
   while read -r line; do
     (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
     { handle $line </dev/tty | __output; } &
