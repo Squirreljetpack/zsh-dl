@@ -185,13 +185,13 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-Usage: dl [config] [-hlesvq] [-r count] [- input] […log_ids]
+Usage: dl [config] [-hlesvq] [--from id] [- input] […log_ids]
 
 Extensible cli download tool.
 
 Subcommands:
-  config            : Use <config|DEFAULT>.ini in /home/archr/.config/zsh-dl as the config.
-                        A unique prefix can be specified instead as well.
+  config            : Use <config|DEFAULT>.ini in ~/.config/zsh-dl as the config.
+                        A unique prefix can be specified in place of the full name.
 Options:
   - <input>        : Process <input> instead of reading from stdin/clipboard.
                         Can be specified multiple times.
@@ -202,7 +202,9 @@ Options:
                         '.s' to filter by status
   --from [log_id=0] : Retry failed downloads.
   -s                : Skip inputs which succeded in the past.
-  -v                : Set verbosity 2.
+  -v                : Increment verbosity.
+                        (At default verbosity, log entries with
+                        codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
   --verbose [level] : Set verbosity level.
@@ -237,7 +239,7 @@ Status codes:
   -2: Unhandled/Skipped
   -1: Partial Success
    0: Success
-  >0: Handling error
+ > 0: Handling error
 ```
 
 # Configuration

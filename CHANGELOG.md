@@ -1,6 +1,12 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [0.3.2] - 2025-09-27
+
+- Various cli bugfixes
+- Fix newline display in logs
+- shorten '-x' to '-' for input specification
+- hide ancillary logs from non-verbose log table
+- documentation additions
 
 ## [0.3.1] - 2025-08-16
 
