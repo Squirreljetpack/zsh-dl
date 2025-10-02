@@ -27,6 +27,7 @@ http.ytdlp() {
   log_stderr $YTDLPcmd \
     -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
     --abort-on-unavailable-fragments \
+    --cookies-from-browser $BROWSER \
     --print after_move:filepath \
     -o "%(title)s.%(ext)s" \
     $ARGS \
@@ -35,7 +36,8 @@ http.ytdlp() {
 }
 
 http.images() {
-  failure_or_show $=IMAGESDLcmd $ARGS $TARGET
+  # download to current directory
+  failure_or_show $GALLERYDLcmd -D . $ARGS $TARGET
 }
 
 http.ytdlp_audio() {
@@ -46,6 +48,7 @@ http.ytdlp_audio() {
     -ciw \
     --extract-audio \
     --audio-format opus \
+    --cookies-from-browser $BROWSER \
     --print after_move:filepath \
     -o "%(title)s.%(ext)s" \
     $ARGS \

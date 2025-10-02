@@ -2,8 +2,9 @@
 
 setopt extended_glob
 setopt local_options
+zmodload zsh/stat
 autoload -Uz colors && colors
-
+IFS=$' \t\n'
 
 ### HANDLERS
 
@@ -339,7 +340,37 @@ read_dest() {
 }
 
 get_html_field() {
-  sed -n 's:.*<$field>\(.*\)</$field>.*:\1:p' $1 | tr -cd '[a-zA-Z0-9 -_[]()]'
+  local field="$1"
+  sed -n "s:.*<${field}>\(.*\)</${field}>.*:\1:p" $2 | tr -cd '[a-zA-Z0-9 -_[]()]'
+}
+
+get_url_title() {
+  local url="$1"
+  curl -s "$url" | get_html_field title
+}
+
+get_last_modified() {
+  # : given [..directories], outputs the last modified file of them all.
+  local newest=() lf="" lm=0 cm
+  while (($#)); do
+    newest+=(${1%%/#}/*([1]omN))
+    shift 1
+  done
+  
+  [[ -n $newest ]] && {
+    local latest=""
+    local latest_mtime=0
+    
+    for f in $newest; do
+        cm=$(zstat +mtime $f)
+        if (( cm > latest_mtime )); then
+            lf="$f"
+            lm=$cm
+        fi
+    done
+    
+    echo $lf
+  }
 }
 
 get_file_type() {
@@ -525,11 +556,17 @@ __truncate_right() {
 __truncate_left() {
   local text=$1
   local width=$2
-  if (( $#text > width )); then
-    print -n -- "…${text:$(( $#text - width + 1 ))}"
-  else
-    printf "%*s" $width $text
-  fi
+  local trunc=false
+  (( ${(m)#text} > width )) && trunc=true
+  local init=$(( $#text - width + 1 ))
+  text=${text:$(( init > 0 ? init : 0 ))}
+  # adjust for multi-width chars
+  while (( ${(m)#text} > width - 1)); do
+    text=${text:1}
+  done
+  $trunc && text="…$text"
+  repeat $(( width - ${(m)#text})); do printf " "; done
+  printf $text
 }
 
 
@@ -682,7 +719,7 @@ __show_log_entries() {
   done
 }
 
-# todo: 
+# todo: right truncate dest lines, autodetermine widths from terminal
 __show_log() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log "Database not found: $ZSHDL_DB"
@@ -694,8 +731,22 @@ __show_log() {
     "SELECT id,
             strftime('%m-%d %H:%M:%S', time, 'localtime'),
             COALESCE(input, target),
-            REPLACE(COALESCE(msg, ' '), x'0A', '↵'),
-            REPLACE(COALESCE(dest, ' '), x'0A', '↵'),
+            COALESCE(
+              CASE
+                WHEN instr(msg, x'0A') > 0
+                THEN substr(msg, 1, instr(msg, x'0A') - 1)
+                ELSE msg
+              END,
+              ' '
+            ),
+            COALESCE(
+              CASE
+                WHEN instr(dest, x'0A') > 0
+                THEN substr(dest, 1, instr(dest, x'0A') - 1)
+                ELSE dest
+              END,
+              ' '
+            ),
             LS
      FROM \"$ZSHDL_VARIANT\"
      $LOG_FILTER
@@ -710,26 +761,34 @@ __show_log() {
   data=${data//$'\t'http(|s):\/\/(www.|)/$'\t'} # todo
   data=${data//$'\t'$HOME/$'\t'\~}
 
-  local headers=$'ID\tTime\tTarget\tMessage\tDestination\tSt'
-  local all_data=${headers}$'\n'${data}
+  local headers=$'ID\tTime\tTarget\tContent\tSt'
 
   local -a col_widths
   col_widths=($(awk -F'\t' '
   {
-    for(i=1; i<=NF; i++) {
-      gsub(/\x1b\[[0-9;]*m/, "", $i)
-      len = length($i)
-      if (len > max[i]) max[i] = len
-    }
+    for(i=1; i<=NF; i++) { gsub(/\x1b\[[0-9;]*m/, "", $i) }
+
+    if (length($1) > max[1]) max[1] = length($1)
+    if (length($3) > max[2]) max[2] = length($3)
+    if (length($5) > max[3]) max[3] = length($5)
   }
   END {
-    w1 = max[1]; printf "%d ", w1;                                    # ID (exact width)
-    w2 = 14; printf "%d ", w2;                      # Time
-    w3 = (max[3]<10)?10:max[3]; w3 = (w3>40)?40:w3; printf "%d ", w3; # Target
-    w4 = (max[4]<7)?7:max[4]; w4 = (w4>40)?40:w4; printf "%d ", w4; # Message
-    w5 = (max[5]<20)?20:max[5]; w5 = (w5>30)?30:w5; printf "%d ", w5; # Destination
-    w6 = 2; printf "%d ", w6;                        
-  }' <<< "$all_data"))
+    printf "%d %d %d %d %d\n", max[1], 14, max[2], max[3], 2
+  }' <<< "$data"))
+
+  # Calculate space available for flexible columns
+  local term_width=${COLUMNS:-120}
+  
+  local fixed_width=$(( col_widths[1] + col_widths[2] + col_widths[5] ))
+  local border_padding=$(( (5 * 3) + 1 )) # 5 visible columns
+  local available_width=$(( term_width - fixed_width - border_padding ))
+  local ideal_3=$(( available_width / 2 ))
+  [[ $available_width -lt 17 ]] && available_width=17
+
+  (( col_widths[3] + col_widths[4] < available_width )) || {
+    col_widths[3]=$(( $col_widths[3] > ideal_3 ? ideal_3 : $col_widths[3] ))
+    col_widths[4]=$(( available_width - col_widths[3] ))
+  }
 
   # Build and Print Table
   local top_border=┌
@@ -758,13 +817,12 @@ __show_log() {
 
   print "Displaying logs for the $ZSHDL_VARIANT config:"
   print "$top_border"
-  printf "│ %s │ %s │ %s │ %s │ %s │ %s │\n" \
+  printf "│ %s │ %s │ %s │ %s │ %s │\n" \
     "$(__center_text 'ID' "${col_widths[1]}")" \
     "$(__center_text 'Time' "${col_widths[2]}")" \
     "$(__center_text 'Target' "${col_widths[3]}")" \
-    "$(__center_text 'Message' "${col_widths[4]}")" \
-    "$(__center_text 'Destination' "${col_widths[5]}")" \
-    "$(__center_text 'St' "${col_widths[6]}")"
+    "$(__center_text 'Content' "${col_widths[4]}")" \
+    "$(__center_text 'St' "${col_widths[5]}")"
   print "$sep_border"
 
   while IFS=$'\t' read -r id time target msg dest ls; do
@@ -772,16 +830,18 @@ __show_log() {
     local id_str="$(__center_text "$id" "${col_widths[1]}")"
     local time_str="$(__truncate_right "$time" "${col_widths[2]}")"
     local target_str="$(__truncate_right "$target" "${col_widths[3]}")"
-    local msg_str="$(__truncate_right "$msg" "${col_widths[4]}")"
-    local dest_str="$(__truncate_left "$dest" "${col_widths[5]}")"
-    local ls_str="$(__center_text "$ls" "${col_widths[6]}")"
+    if [[ $msg != ' ' ]]; then
+      local content_str="$(__truncate_right "$msg" "${col_widths[4]}")"
+    else
+      local content_str="$(__truncate_left "$dest" "${col_widths[4]}")"
+    fi
+    local ls_str="$(__center_text "$ls" "${col_widths[5]}")"
 
-    printf "│ %s │ %s │ %s │ %s │ %s │ %s%s%s │\n" \
+    printf "│ %s │ %s │ %s │ %s │ %s%s%s │\n" \
       "$id_str" \
       "$time_str" \
       "$target_str" \
-      "$msg_str" \
-      "$dest_str" \
+      "$content_str" \
       "$color" "$ls_str" "${reset_color}"
   done <<< "$data"
 
@@ -876,73 +936,27 @@ __input() {
       print -rl -- $INPUTS
     else
       if [ -t 0 ]; then
-        echo "$(${=PASTEcmd})" # buffer
+        out="$(${=PASTEcmd})" # buffer
+        [[ -n $out ]] || out="$(${=PASTEcmd})"
+        echo $out
       elif $ZSHDL_ITER_ARGS; then
         print -rl -- $@
       else
         cat
       fi
     fi
-  } | __lg_filter_skipped | {
-    if $ZSHDL_USE_QUEUE; then
-      __queue_input
-    else
-      cat
-    fi
-  }
+  } | __lg_filter_skipped
 }
 
-ZSHDL_QUEUE_MARKER="# zsh-dl queue-marker: "
-
-# remove the last line, and read it for the current line (progress)
-__remove_queue_marker() {
-  [[ -e $ZSHDL_QUEUE_FILE ]] || return 1
-  last_line="$(tail -n 1 -- $ZSHDL_QUEUE_FILE)"
-  last_number=${last_line##$ZSHDL_QUEUE_MARKER}
-  if [[ $last_line != $last_number ]]; then
-    if [[ $last_number == [0-9]## ]]; then
-      ex -sc '$d|x' $ZSHDL_QUEUE_FILE # delete last line
-    else
-      err QueueError "Invalid queue marker encountered"
-      return 1
-    fi
+__read_queue_state() {
+  [[ -e $ZSHDL_QUEUE_FILE.state ]] || return 1
+  last_number="$(tail -n 1 -- $ZSHDL_QUEUE_FILE.state)"
+  if [[ $last_number == [0-9]## ]]; then
+    : > $ZSHDL_QUEUE_FILE.state
   else
+    err QueueError "Invalid queue state encountered"
     return 1
   fi
-}
-
-__queue_input() {
-  if __remove_queue_marker; then
-    CURRENT_LINE=$last_number
-    TRIM=$(( CURRENT_LINE - CURRENT_LINE % ZSHDL_MAX_QUEUE_SIZE ))
-    if ((TRIM)); then
-      tmp="$(mktemp)"
-      tail -n +$(( TRIM + 1 )) $ZSHDL_QUEUE_FILE > $tmp && mv $tmp $ZSHDL_QUEUE_FILE
-    fi
-    CURRENT_LINE=$(( CURRENT_LINE % ZSHDL_MAX_QUEUE_SIZE ))
-  else
-    CURRENT_LINE=1
-  fi
-
-  {
-    cat
-    echo "$ZSHDL_QUEUE_MARKER$CURRENT_LINE"
-  } >> $ZSHDL_QUEUE_FILE
-
-  tail -n +$CURRENT_LINE -- $ZSHDL_QUEUE_FILE | while IFS= read -r line; do
-    [[ $line != ${line#$ZSHDL_QUEUE_MARKER} ]] && break
-
-    # skip comments
-    if [[ $line == ${line#"# "} ]]; then
-      echo $line
-    else
-      ((VERBOSE > 2)) && print $line >&2
-    fi
-
-    __remove_queue_marker || err "Missing queue file @ $ZSHDL_QUEUE_FILE"
-    ((CURRENT_LINE++))
-    printf "$ZSHDL_QUEUE_MARKER$CURRENT_LINE" >> $ZSHDL_QUEUE_FILE
-  done
 }
 
 __mkpipe() {
@@ -1208,8 +1222,7 @@ __read_config() {
   done
 
   if [[ -n $ZSHDL_QUEUE_FILE ]]; then
-    qb=${ZSHDL_QUEUE_FILE%_CONFIG}
-    [[ $qb != $ZSHDL_QUEUE_FILE ]] && ZSHDL_QUEUE_FILE="${qb}_${ZSHDL_VARIANT}"
+    __set_queue_file
 
     if [[ -s $ZSHDL_QUEUE_FILE ]]; then
       dbg "Queue is nonempty: $ZSHDL_QUEUE_FILE"
@@ -1218,6 +1231,11 @@ __read_config() {
       dbg "Queue is empty: $ZSHDL_QUEUE_FILE"
     fi
   fi
+}
+
+__set_queue_file() {
+  local qbase=${ZSHDL_QUEUE_FILE%_CONFIG}
+  [[ $qbase != $ZSHDL_QUEUE_FILE ]] && ZSHDL_QUEUE_FILE="${qbase}_${ZSHDL_VARIANT}"
 }
 
 __check_config() {
@@ -1231,44 +1249,68 @@ __check_config() {
 
 __edit_config() {
   local i file files
-  i=3
+  while true; do
+    i=3
+    echo "Editing files for the $ZSHDL_VARIANT config:"
 
-  echo "Editing files for the $ZSHDL_VARIANT config:"
+    echo "1) Clear logs"
+    echo "2) $CONFIG"
+    for file in ${ZSHDL_CONFIG_FILES[@]}; do
+      echo "$i) $file"
+      ((i++))
+    done
+    echo "-) Remove entries"
+    echo ":) Show queue"
+    echo "^) Clear queue"
+    echo "!) Delete Database"
+    echo "(enter) exit"
+    echo
+    print -n "Enter a number to edit: "
+    read -r i
 
-  echo "1) Clear logs"
-  echo "2) $CONFIG"
-  for file in ${ZSHDL_CONFIG_FILES[@]}; do
-    echo "$i) $file"
-    ((i++))
+    case $i in
+    1)
+      sqlite3 $ZSHDL_DB "DROP TABLE '$ZSHDL_VARIANT';" || fatal_err "Could not drop table for $ZSHDL_VARIANT"
+      exit
+      ;;
+    2)
+      file=$CONFIG
+      ;;
+    "!")
+      rm $ZSHDL_DB || fatal_err "Could not delete database"
+      exit
+      ;;
+    ":")
+      echo "\n--- $ZSHDL_QUEUE_FILE ---\n"
+      if [[ -e $ZSHDL_QUEUE_FILE ]]; then
+        cat $ZSHDL_QUEUE_FILE
+        echo "\n--- state ---\n"
+        cat $ZSHDL_QUEUE_FILE.state
+      else
+        info "No queue"
+      fi
+      ;;
+    "^")
+      rm $ZSHDL_QUEUE_FILE $ZSHDL_QUEUE_FILE.state || fatal_err "Could not delete queue files"
+      ;;
+    "-")
+      printf "Enter log ids: "
+      read -r line
+      __parse_log_args $=line
+      __delete_log_entries $LOG_ARGS
+      ;;
+    '')
+      exit 0
+      ;;
+    *)
+      file=${ZSHDL_CONFIG_FILES[$((i-2))]}
+      [[ -n $file ]] || fatal_err InvalidSelection
+
+      ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $file
+      __check_config
+      ;;
+    esac
   done
-  echo "-) Remove entries"
-  echo "!) Delete Database"
-  print -n "Enter a number to edit: "
-  read -r i
-
-
-
-  if [[ $i == 1 ]]; then
-    sqlite3 $ZSHDL_DB "DROP TABLE '$ZSHDL_VARIANT';" || fatal_err "Could not drop table for $ZSHDL_VARIANT"
-    exit
-  elif [[ $i == 2 ]]; then
-    file=$CONFIG
-  elif [[ $i == "!" ]]; then
-    rm $ZSHDL_DB || fatal_err "Could not delete database"
-    exit
-  elif [[ $i == "-" ]]; then
-    printf "Enter log ids: "
-    read -r line
-    __parse_log_args $=line
-    __delete_log_entries $LOG_ARGS
-  else
-    file=${ZSHDL_CONFIG_FILES[$((i-2))]}
-  fi
-
-  [[ -n $file ]] || fatal_err InvalidSelection
-
-  ${CONFIG_EDITOR:-${VISUAL:-${EDITOR:-nano}}} $file
-  __check_config
 }
 
 __display_api() {
@@ -1351,8 +1393,8 @@ exportCmdVar "HTML2MARKDOWNcmd" \
 exportCmdVar "YTDLPcmd" \
   "yt-dlp"
 
-exportCmdVar "IMAGESDLcmd" \
-  "gallery-dl -D ."
+exportCmdVar "GALLERYDLcmd" \
+  "gallery-dl"
 
 if ! have lt; then
   lt() {
@@ -1389,7 +1431,7 @@ CONSTANTS=(ZSHDL_CONNECT_TIMEOUT ZSHDL_THREADS ZSHDL_PP_THREADS VERBOSE ZSHDL_FO
 : ${ZSHDL_FORCE_PROTO}
 : ${ZSHDL_OUTPUT_DIR:=./}
 : ${ZSHDL_LOG_DISPLAY_LIMIT:=50}
-: ${ZSHDL_MAX_QUEUE_SIZE:=500}
+: ${ZSHDL_MAX_QUEUE_HISTORY_SIZE:=500}
 [[ $ZSHDL_ITER_ARGS == (true|false) ]] || ZSHDL_ITER_ARGS=false
 
 : ${ZSHDL_STATE_DIR:=$HOME/.local/state/zsh-dl}
@@ -1459,9 +1501,11 @@ Status codes:
    0: Success
  > 0: Handling error
 EOF
-  
+
+  # '
   (($#)) && exit $1
 }
+
 
 SHOWHELP=false
 CLEAR_LOGS=false
@@ -1628,15 +1672,48 @@ trap "rm $PP $LG" EXIT
 
 tasks=()
 
+whitespace=$IFS
+$ZSHDL_STRIPWHITESPACE && whitespace=
 
-__input $@ | {
-$ZSHDL_STRIPWHITESPACE || IFS=
-  while read -r line; do
-    (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
-    { handle $line </dev/tty | __output; } &
-    tasks+=$!
+if ! $ZSHDL_USE_QUEUE; then
+  __input $@ | {
+    while IFS=$whitespace read -r line; do
+      [[ -n $line ]] || continue
+      (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
+      { handle $line </dev/tty | __output; } &
+      tasks+=$!
+    done
+  }
+else
+  { __input $@ && echo; } >> $ZSHDL_QUEUE_FILE
+  if __read_queue_state; then
+    CURRENT_QUEUE_LINE=$((last_number % ZSHDL_MAX_QUEUE_HISTORY_SIZE))
+    TRIM=$(( last_number - CURRENT_QUEUE_LINE ))
+    if ((TRIM)); then
+      tmp="$(mktemp)" &&
+      tail -n +$(( TRIM + 1 )) $ZSHDL_QUEUE_FILE > $tmp &&
+      mv $tmp $ZSHDL_QUEUE_FILE || fatal_err "Error trimming queue"
+    fi
+  else
+    CURRENT_QUEUE_LINE=1
+  fi
+
+  tail -n +$CURRENT_QUEUE_LINE -- $ZSHDL_QUEUE_FILE | while IFS= read -r line; do
+    # skip comments
+    if [[ $line == ${line#"# "} ]]; then
+      [[ -n $line ]] || continue
+      (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
+      { handle $line </dev/tty | __output; } &
+      tasks+=$!
+    else
+      ((VERBOSE > 2)) && print -u2 -- $line
+    fi
+
+    {
+      echo $((++CURRENT_QUEUE_LINE))
+    } > $ZSHDL_QUEUE_FILE.state
   done
-}
+fi
 
 exec {pp}>&-
 exec {lg}>&-
