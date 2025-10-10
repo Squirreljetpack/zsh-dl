@@ -483,10 +483,10 @@ success_or_log() {
   fi
 }
 
-failure_or_show() {
+show_or_fail() {
   : args: command_to_run args_to_cmd
   : outputs stdin on sucess, logs stderr on failure
-  : use "failure_or_show" on the final step if it is failable
+  : use "show_or_fail" on the final step if it is failable
   :
   err_tf="$(mktemp)"
   trap 'rm $err_tf' EXIT
@@ -501,13 +501,13 @@ failure_or_show() {
     echo $output
     return
   fi
-
+  return $code
 }
 
 
 log_stderr() {
   : args: command_to_run args_to_cmd
-  : outputs: same as command, but duplicates stderr to logging
+  : outputs: run command and duplicate stderr to logging
   :
   err_tf="$(mktemp)"
   dbgvar err_tf
@@ -516,11 +516,12 @@ log_stderr() {
   code=$?
   err_msg="$(< $err_tf)"
   [[ -n $err_msg ]] || return
-  if ((code > 0)); then
+  if ((code)); then
     LS=$code _log_msg "[ERROR: ${(j. .)@}] $err_msg"
   else
     LS=$code _log_msg "[INFO: ${(j. .)@}] $err_msg"
   fi
+  return $code
 }
 
 ## Log rendering utils
@@ -765,12 +766,17 @@ __show_log() {
 
   local -a col_widths
   col_widths=($(awk -F'\t' '
-  {
+  BEGIN {
+    max[1]=2
+    max[2]=6
+    max[3]=7
+  }
+  { 
     for(i=1; i<=NF; i++) { gsub(/\x1b\[[0-9;]*m/, "", $i) }
 
     if (length($1) > max[1]) max[1] = length($1)
     if (length($3) > max[2]) max[2] = length($3)
-    if (length($5) > max[3]) max[3] = length($5)
+    if (length($4) > max[3]) max[3] = length($4)
   }
   END {
     printf "%d %d %d %d %d\n", max[1], 14, max[2], max[3], 2
@@ -1326,7 +1332,7 @@ __display_api() {
 
   echo "\n### API ###\n"
 
-  api=(read_dest failure_or_show success_or_log log_stderr)
+  api=(read_dest success_or_log log_stderr show_or_fail)
   for f in $api; do
     functions $f
   done
@@ -1389,12 +1395,6 @@ exportCmdVar "FORMATPYTHONcmd" \
 
 exportCmdVar "HTML2MARKDOWNcmd" \
   "html2markdown"
-
-exportCmdVar "YTDLPcmd" \
-  "yt-dlp"
-
-exportCmdVar "GALLERYDLcmd" \
-  "gallery-dl"
 
 if ! have lt; then
   lt() {
@@ -1523,7 +1523,8 @@ new_args=()
 _posargs=false
 
 if [[ -n $1 && $1 != -* && $1 != : ]]; then
-  CONFIG=($ZSHDL_CONFIG_DIR/$1*.ini)
+  CONFIG=($ZSHDL_CONFIG_DIR/$1*.ini(N))
+  [[ -n $CONFIG ]] || fatal_err "Invalid subcommand: $1"
   shift 1
 fi
 
