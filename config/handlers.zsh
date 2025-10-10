@@ -24,7 +24,7 @@ http.ytdlp() {
   # Unfortunately is no way to show progress with :filepath, but -v can give some indication
   ((VERBOSE > 1)) && ARGS+=(-v)
 
-  log_stderr $YTDLPcmd \
+  log_stderr yt-dlp \
     -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best,bestvideo+bestaudio/best" \
     --abort-on-unavailable-fragments \
     --cookies-from-browser $BROWSER \
@@ -35,15 +35,10 @@ http.ytdlp() {
     awk '!seen[$0]++'
 }
 
-http.images() {
-  # download to current directory
-  failure_or_show $GALLERYDLcmd -D . $ARGS $TARGET
-}
-
 http.ytdlp_audio() {
   ((VERBOSE > 1)) && ARGS+=(-v)
 
-  log_stderr $YTDLPcmd \
+  log_stderr yt-dlp \
     -f "bestaudio/best" \
     -ciw \
     --extract-audio \
@@ -56,10 +51,38 @@ http.ytdlp_audio() {
     awk '!seen[$0]++'
 }
 
+http.images_flat() {
+  # download to current directory
+  show_or_fail gallery-dl -D . $ARGS $TARGET
+}
+
+# download single single files directly and multiple files to a directory
+http.images() {
+  set -o local_options pipefail
+  local dest=$1:t first= line= second=false
+  
+  log_stderr gallery-dl -D $dest $ARGS $TARGET | {
+    while read -r line; do
+      [[ -n $line ]] || continue
+      [[ -z $first ]] && first=$line && second=true && continue
+      $second && echo $first && second=false
+      echo $line
+    done
+  } || return
+  
+  if $second && [[ -n $first ]]; then
+    local fdest=${first#*/}
+    [[ -e $fdest ]] && echo $fdest
+    mv $first $fdest
+    local files=($dest/*(ND))
+    (( $#files == 0 )) && rm -r $dest || warn "Preserved $dest due to files remaining"
+  fi 
+}
+
 # Example of fallback to image download if no video present i.e. reddit posts
 http.dl() {
-  failure_or_show http.ytdlp $@ ||
-  failure_or_show http.images $@
+  show_or_fail http.ytdlp $@ ||
+  show_or_fail http.images $@
 }
 
 # Downloads folders, images, or single branches of repositories from
@@ -153,16 +176,16 @@ file.walk() {
 
 file.fmt_py() {
   [[ -e ~/ruff_$FORMAT.toml ]] && ARGS+=(--config ~/ruff_$FORMAT.toml)
-  failure_or_show ruff format $ARGS $1
+  show_or_fail ruff format $ARGS $1
 }
 
 file.fmt_biome() {
   [[ -e ~/biome_$FORMAT.toml ]] && ARGS+=(--config-path ~/biome_$FORMAT.toml)
-  failure_or_show biome format $ARGS $1
+  show_or_fail biome format $ARGS $1
 }
 
 file.fmt_sh() {
-  failure_or_show shfmt -w $1
+  show_or_fail shfmt -w $1
 }
 
 # this example demonstrates how matching can be done on any of the

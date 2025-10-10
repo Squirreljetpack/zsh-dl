@@ -267,8 +267,6 @@ See `dl -v --help`
     - `PASTEcmd`
     - `FORMATPYTHONcmd`
     - `HTML2MARKDOWNcmd`
-    - `YTDLPcmd`
-    - `IMAGESDLcmd`
 
 </br>
 
