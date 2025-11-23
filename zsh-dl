@@ -270,8 +270,12 @@ ssh.default() {
   : output: successfully created files, one per line
   :
   read_dest ssh $2  || return 0
-  [[ -d $dest ]] && dest=$dest:t
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:${(@qq)2} $dest || return # -u does an update in case we decided to keep the target, :t is due to rsync always copies into directories
+
+  local slash=''
+  if ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT $1 "[ -d ${(@qq)2} ]"; then
+    slash='/'
+  fi
+  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:${(@qq)2}$slash $dest || return # -u does an update in case we decided to keep the target
   [[ -e $dest ]] && echo $dest
 }
 

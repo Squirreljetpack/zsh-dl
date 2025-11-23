@@ -1,4 +1,9 @@
-# Changelog
+## [0.3.3] - 2025-11-23
+
+### 🚀 Features
+
+- Add get_title/last_modified, improve log table display, improve queue
+- auto-add trailing slash when downloading directories over ssh with rsync
 
 ## [0.3.2] - 2025-09-27
 
