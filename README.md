@@ -185,7 +185,7 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-Usage: dl [config] [-hlesvq] [--from id] [- input] […log_ids]
+Usage: dl [config] [-hlesvqd] [--from id] [- input] […log_ids]
 
 Extensible cli download tool.
 
@@ -207,6 +207,7 @@ Options:
                         codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
+  -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
   …method_args      : Passed to the ARGS array of methods.

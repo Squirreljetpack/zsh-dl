@@ -1449,7 +1449,7 @@ usage() {
   ((VERBOSE>1)) && __display_api
 
   cat <<EOF
-Usage: $PROG [config] [-hlesvq] [--from id] [- input] […log_ids]
+Usage: $PROG [config] [-hlesvqd] [--from id] [- input] […log_ids]
 
 Extensible cli download tool.
 
@@ -1471,6 +1471,7 @@ Options:
                         codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
+  -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
   …method_args      : Passed to the ARGS array of methods.
@@ -1550,6 +1551,20 @@ while (($#)); do
         continue
       fi
       ;|
+    -d)
+      if ! $_posargs; then
+        if [[ -d "$2" ]]; then
+          cd $2
+          info "CWD" "$2"
+          shift
+        else
+          fatal_err "Directory not found" "$2"
+        fi
+        shift
+        continue
+      fi
+      
+      ;;
     --clear)
       CLEAR_LOGS=true
       ;;
