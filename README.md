@@ -1,13 +1,6 @@
 # zsh-dl: Basic Downloader
 
-`zsh-dl` is a tool for downloading and post-processing files.
-
-Actually, that's not quite right. Really, its a framework for workflows that consume and process lines. It provides chaining, concurrency and logging, as well as a cli for dispatching to those workflows designed with brevity in mind.
-
-The tool itself doesn't actually do any downloading or processing. Instead, it is used to define handlers for tree/case-type logic with shell functions[^1], which can then in turn call out to tools on your system[^2].
-
-In my daily use, it usually feels something like a context-dependent amalgamation of shell aliases, for quickly downloading, previewing, and processing whatever is on my clipboard.
-
+`zsh-dl` is a tool for downloading files.
 
 ```zsh
 # downloads the folder into your current directory
@@ -23,6 +16,12 @@ dl a - "https://www.youtube.com/watch?v=l5ihnPWKJZU" # Downloads audio
 # Downloads images (would be video without 'a')
 dl a - "https://www.reddit.com/r/interesting/comments/1l114tz/an_arctic_weather_station_on_abandoned_kolyuchin/"
 ```
+
+Actually, that's not quite right. Really, its a framework for workflows that consume and process lines. It provides chaining, concurrency and logging, as well as a cli for dispatching to those workflows designed with brevity in mind.
+
+The tool itself doesn't actually do any downloading or processing. Instead, it is used to define handlers for tree/case-type logic with shell functions[^1], which can then in turn call out to tools on your system[^2].
+
+In my daily use, it usually feels something like a context-dependent amalgamation of shell aliases, for quickly downloading, previewing, and processing whatever is on my clipboard.
 
 [^1]: Currently, by parsing input according to protocol, and then matching the parsed data with globs.
 [^2]: i.e. `curl`, `ssh`, or `yt-dlp`.
@@ -185,7 +184,7 @@ All these can be easily reconfigured through setting variables or writing a hand
 # Usage
 
 ```
-Usage: dl [config] [-hlesvq] [--from id] [- input] […log_ids]
+Usage: dl [config] [-hlesvqd] [--from id] [- input] […log_ids]
 
 Extensible cli download tool.
 
@@ -207,6 +206,7 @@ Options:
                         codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
   -q                : Use the default queue file
+  -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
   --clear [glob]    : Clear logs.
   …method_args      : Passed to the ARGS array of methods.
