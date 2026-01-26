@@ -277,6 +277,7 @@ See `dl -v --help`
 
 # Future directions [^8]
 
+- Read headers for better name and extension determination
 - ~~Use a more powerful expression language than glob~~  
 - ~~Advanced mime detection~~  
 - ~~Lessfilter implementation~~  
