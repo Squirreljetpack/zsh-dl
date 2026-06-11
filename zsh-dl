@@ -10,7 +10,7 @@ IFS=$' \t\n'
 
 # entrypoint
 handle() {
-  export LS=-3
+  export LS=-4
   export TARGET=$1
   STAGE=0
 
@@ -87,7 +87,7 @@ handle_sftp() {
 handle_file() {
   _read_target_type_mime_encoding $1
   infovar target type mime encoding
-	
+
   while IFS='=' read -r _handler pattern; do
 	  patterns=("${(s.:.)pattern}")
     if [[ $target == ${~patterns[1]:-*} &&
@@ -136,7 +136,7 @@ handle_na() {
       fi
     done <<< $NA_HANDLERS
   fi
-  
+
   internal_err
 }
 
@@ -147,7 +147,7 @@ handle_misc() {
 
   while IFS='=' read -r _handler pattern; do
     if [[ $target == $~pattern ]]; then
-      [[ $_handler != na.default ]] && LS=-3
+      [[ $_handler != na.default ]] && LS=-4
       handler=${_handler%(\||:)*}
       _method=${_handler#$handler}
       seperator=${_method:0:1}
@@ -160,7 +160,7 @@ handle_misc() {
       [[ $seperator == : ]] && return
     fi
   done <<< $MISC_HANDLERS
-  
+
   internal_err
 }
 
@@ -236,7 +236,7 @@ __read_args() {
 
 #### API
 
-# Note on naming: "API" functions available for use in config code are named normally, functions which are lower level or for overriding are prefixed with a _, __functions are internal, 
+# Note on naming: "API" functions available for use in config code are named normally, functions which are lower level or for overriding are prefixed with a _, __functions are internal,
 
 ## Handler Defaults
 http.default() {
@@ -248,7 +248,7 @@ http.default() {
   [[ $target != http(|s)://* ]] && target="https://$target"
   [[ -n $2 ]] && target+="?$2"
   shift 1
-  
+
   case $dest in
     *)
       opts=()
@@ -257,11 +257,11 @@ http.default() {
       else
         opts+=(-o $dest)
       fi
-      
+
       success_or_log curl -fL $opts $target || return
       ;;
   esac
-  
+
   echo $dest
 }
 
@@ -360,11 +360,11 @@ get_last_modified() {
     newest+=(${1%%/#}/*([1]omN))
     shift 1
   done
-  
+
   [[ -n $newest ]] && {
     local latest=""
     local latest_mtime=0
-    
+
     for f in $newest; do
         cm=$(zstat +mtime $f)
         if (( cm > latest_mtime )); then
@@ -372,7 +372,7 @@ get_last_modified() {
             lm=$cm
         fi
     done
-    
+
     echo $lf
   }
 }
@@ -577,9 +577,10 @@ __truncate_left() {
 
 _get_LS_color() {
   case $1 in
-    -2) print -n '\033[90m' ;;      # Muted Grey (for Skipped)
-    -1) print -n  "${fg[blue]}" ;;      # Blue (for partial success)
-    0) print -n "${fg[green]}" ;;      # Green (for total success)
+    -3) print -n '\033[90m' ;;      # Muted Grey (for Skipped)
+    -2) print -n "${fg[yellow]}" ;;    # Yellow (for partial success)
+    -1) print -n "${fg[blue]}" ;;      # Blue (for download complete)
+    0) print -n "${fg[green]}" ;;      # Green (for normal success)
     -*) print -n "${fg[white]}" ;;      # White (for misc)
     2) print -n '\033[38;5;203m' ;; # Salmon
     *) print -n "${fg[red]}" ;;    # Bright Red (for Errors)
@@ -604,9 +605,9 @@ __parse_log_args() {
         ;;
     esac
   done
-  
+
   (($#status_filters)) && LOG_FILTER="WHERE LS IN (${(j. .)status_filters})" ||
-  ((VERBOSE > 1)) || LOG_FILTER="WHERE LS >= -2" # don't show logging logs without -v
+  ((VERBOSE > 1)) || LOG_FILTER="WHERE LS >= -3" # don't show logging logs without -v
 }
 
 __delete_log_entries() {
@@ -683,7 +684,7 @@ __show_log_entries() {
     [[ -n $LOG_FILTER ]] && base_select+=" AND" || base_select+=" WHERE"
     query="$base_select id IN ($ids_list);"
   fi
-  
+
   first_entry=true
   stty -icanon -ixon
   sqlite3 -separator $'\x1E' -newline $'\x1F' "$ZSHDL_DB" "$query" |
@@ -712,7 +713,7 @@ __show_log_entries() {
     fi
 
     print
-    
+
     if [[ -n "${log_dest# }" ]]; then
         print "  Destination:"
         print -r -- "${log_dest}" | sed -e 's/^/    /'
@@ -775,7 +776,7 @@ __show_log() {
     max[2]=6
     max[3]=7
   }
-  { 
+  {
     for(i=1; i<=NF; i++) { gsub(/\x1b\[[0-9;]*m/, "", $i) }
 
     if (length($1) > max[1]) max[1] = length($1)
@@ -788,7 +789,7 @@ __show_log() {
 
   # Calculate space available for flexible columns
   local term_width=${COLUMNS:-120}
-  
+
   local fixed_width=$(( col_widths[1] + col_widths[2] + col_widths[5] ))
   local border_padding=$(( (5 * 3) + 1 )) # 5 visible columns
   local available_width=$(( term_width - fixed_width - border_padding ))
@@ -862,11 +863,11 @@ __show_log() {
 
 # entrypoint
 __begin_pp() {
-  tasks=()
+  local tasks=()
   export INPUT
   export TARGET
   while IFS=$'\0' read -r INPUT _method TARGET STAGE; do
-    [[ -z $pp ]] && 
+    [[ -z $pp ]] &&
     method=${_method%%:*}
     [[ $method != $_method ]] && rest=${_method#$method:} || rest=
 
@@ -887,7 +888,7 @@ __begin_pp() {
     else
       internal_err InvalidPostprocessingMethod "(Method: $method) for (Input: $INPUT)"
     fi &
-    tasks+=$!
+    tasks+=($!)
   done < $1
 }
 
@@ -1116,7 +1117,7 @@ _log_skipped() {
     method=
   fi
 
-  print -r -- -2$'\0'$TARGET$'\0'$method$'\0'"${1:-"# "}"$'\0'$INPUT >&$lg # second last field cannot be empty
+  print -r -- -3$'\0'$TARGET$'\0'$method$'\0'"${1:-"# "}"$'\0'$INPUT >&$lg # second last field cannot be empty
 }
 
 _log_dest() {
@@ -1134,13 +1135,13 @@ _log_dest() {
   _args=""
 
   if [[ -n $2 ]]; then
-    LS=-1
+    LS=-2
     method="-> $2"
-    print -u2 -- "${fg[blue]}[Processed]${reset_color} $dest"
+    print -u2 -- "${fg[yellow]}[Processed]${reset_color} $dest"
   else
     method=
-    LS=0
-    print -u2 -- "${fg[green]}[Complete]${reset_color} $dest"
+    LS=-1
+    print -u2 -- "${fg[blue]}[Complete]${reset_color} $dest"
   fi
 
   print -r --  $LS$'\0'$TARGET$'\0'$method$'\0'$dest$'\0'$INPUT$'\0'$_args >&$lg
@@ -1154,7 +1155,7 @@ __finish_lg() {
 
 __assert_config_exists() {
   for f in $@; do
-    [[ -e $f ]] 
+    [[ -e $f ]]
   done
 }
 
@@ -1176,7 +1177,7 @@ __read_config() {
 
   typeset -Ug ZSHDL_CONFIG_FILES
   ZSHDL_CONFIG_FILES=($ZSHDL_CONFIG_DIR/handlers.zsh $ZSHDL_CONFIG_DIR/postprocessors.zsh $ZSHDL_CONFIG_DIR/$ZSHDL_VARIANT_*.zsh(N))
-  
+
   for f in $ZSHDL_CONFIG_FILES; do
     [[ -f $f ]] && source $f || warn ConfigNotFound "$f not found, skipping."
   done
@@ -1407,7 +1408,7 @@ if ! have lt; then
       print -n -u2 "$file exists! Please choose a different name: "
       read -r file </dev/tty || return 1
     done
-    
+
     case $1 in
       -d)    echo $file;;
       -m)    shift 1; mv $@;;
@@ -1501,8 +1502,9 @@ Examples:
 Status codes:
 
    …: Misc/Processing
-  -2: Unhandled/Skipped
-  -1: Partial Success
+  -3: Unhandled/Skipped
+  -2: Partial Success
+  -1: Download Complete
    0: Success
  > 0: Handling error
 EOF
@@ -1563,7 +1565,7 @@ while (($#)); do
         shift
         continue
       fi
-      
+
       ;;
     --clear)
       CLEAR_LOGS=true
@@ -1573,7 +1575,7 @@ while (($#)); do
         if [[ $2 != -* ]]; then
           ZSHDL_QUEUE_FILE=$2
           shift
-        fi  
+        fi
         ZSHDL_USE_QUEUE=true
         have ex || fatal_err "ex is required for -q"
         continue
@@ -1615,7 +1617,7 @@ while getopts "hlevsq-" opt; do
     case "$opt" in
         e)
             MODE=EDIT
-            ;;  
+            ;;
         s)
             ZSHDL_SKIP=true
             ;;
@@ -1688,7 +1690,47 @@ PP="$(__mkpipe dl_pp)"
 PP_ID=$!
 exec {pp}> $PP
 
-trap "rm $PP $LG" EXIT 
+# undocumented guard variable
+ZSHDL_CLEANUP_DONE=false
+
+if ! [[ -v ZSHDL_CLEANUP_SIGNAL ]]; then
+  ZSHDL_CLEANUP_SIGNAL=TERM
+fi
+
+__cleanup() {
+  sig=$1
+  trap - INT TERM EXIT
+  [[ $ZSHDL_SKIP_EXIT == true ]] && return
+  ZSHDL_SKIP_EXIT=true
+
+  all_to_kill=()
+  current_level=($tasks)
+
+  sig=${ZSHDL_CLEANUP_SIGNAL:-${1:-TERM}}
+  [[ $sig == EXIT ]] && sig=TERM
+
+  while [[ -n $current_level ]]; do
+    next_level=()
+    for pid in $current_level; do
+      next_level+=(${(f)"$(pgrep -P $pid 2>/dev/null)"})
+    done
+
+    all_to_kill+=($next_level)
+    current_level=($next_level)
+  done
+
+  if [[ -n $all_to_kill ]]; then
+    info "received $1" "Killing children ($sig): $all_to_kill"
+    kill -$sig -- $all_to_kill 2>/dev/null
+  fi
+
+  rm -f $PP $LG $CB
+
+}
+
+trap '__cleanup INT; exit 1' INT
+trap '__cleanup TERM; exit 1' TERM
+trap '__cleanup EXIT' EXIT
 
 tasks=()
 
@@ -1701,7 +1743,7 @@ if ! $ZSHDL_USE_QUEUE; then
       [[ -n $line ]] || continue
       (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
       { handle $line </dev/tty | __output; } &
-      tasks+=$!
+      tasks+=($!)
     done
   }
 else
@@ -1724,7 +1766,7 @@ else
       [[ -n $line ]] || continue
       (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
       { handle $line </dev/tty | __output; } &
-      tasks+=$!
+      tasks+=($!)
     else
       ((VERBOSE > 2)) && print -u2 -- $line
     fi

@@ -21,7 +21,7 @@ _read_url_params() {
 http.ytdlp() {
   # yt-dlp can exit 1 even on successful download so we just rely on the output
   ((VERBOSE > 1)) && ARGS+=(-v)
-  # metadata=(--embed-metadata --embed-thumbnail)
+  # ARGS+=(--embed-metadata --embed-thumbnail)
   temp_file="$(mktemp)"
 
   log_stderr yt-dlp \
@@ -38,7 +38,8 @@ http.ytdlp() {
 
 http.ytdlp_audio() {
   ((VERBOSE > 1)) && ARGS+=(-v)
-  # metadata=(--embed-metadata --embed-thumbnail)
+  temp_file="$(mktemp)"
+  # ARGS+=(--embed-metadata --embed-thumbnail)
 
   log_stderr yt-dlp \
     -f "bestaudio/wv+bestaudio[acodec=opus]/best" \

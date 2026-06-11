@@ -82,8 +82,7 @@ dl # read from your clipboard
 
 The base functionality is pretty sparse. But for my own use case, there's only a few types of behavior I want depending what's on my clipboard, which zsh-dl makes easy to define and invoke:
 
-- Define handlers directly in Zsh: no fussing about documentation and DSL's.
-
+- Define handlers directly in zsh
 - Reuse components across different protocols
 
 ```shell
@@ -132,9 +131,9 @@ See [Configuration](#handlers-and-preprocessors) for the actual inputs provided 
 ┌────┬────────────────┬──────────────────────────────────────────┬──────────────────────────────────────────┬──────────────────────────────┬──────┐
 │ ID │      Time      │                  Target                  │                 Message                  │         Destination          │ St.  │
 ├────┼────────────────┼──────────────────────────────────────────┼──────────────────────────────────────────┼──────────────────────────────┼──────┤
-│ 3  │ 06-13 14:46:32 │ Do you know the Muffin man The Muffin m… │ [Unhandled]                              │                              │  -2  │
+│ 3  │ 06-13 14:46:32 │ Do you know the Muffin man The Muffin m… │ [Unhandled]                              │                              │  -3  │
 │ 2  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │                                          │   ~/SCRIPTS/zsh-dl/search.md │  3   │
-│ 1  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │ [PP: markdown] invoked for /home/usern/… │ ~/SCRIPTS/zsh-dl/search.html │  0   │
+│ 1  │ 06-13 14:37:06 │ google.com/search?q=nb%20github%20bash%… │ [PP: markdown] invoked for /home/usern/… │ ~/SCRIPTS/zsh-dl/search.html │  -2  │
 └────┴────────────────┴──────────────────────────────────────────┴──────────────────────────────────────────┴──────────────────────────────┴──────┘
 ```
 
@@ -236,8 +235,9 @@ Examples:
 Status codes:
 
    …: Misc/Processing
-  -2: Unhandled/Skipped
-  -1: Partial Success
+  -3: Unhandled/Skipped
+  -2: Partial Success
+  -1: Download Complete
    0: Success
  > 0: Handling error
 ```
