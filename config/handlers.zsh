@@ -20,19 +20,20 @@ _read_url_params() {
 
 http.ytdlp() {
   # yt-dlp can exit 1 even on successful download so we just rely on the output
-  # Unfortunately is no way to show progress with :filepath, but -v can give some indication
   ((VERBOSE > 1)) && ARGS+=(-v)
   # metadata=(--embed-metadata --embed-thumbnail)
+  temp_file="$(mktemp)"
 
   log_stderr yt-dlp \
     -f "bestvideo[vcodec=av01]+bestaudio[acodec=opus]/best[ext=webm] / bv*+ba/b" \
     --abort-on-unavailable-fragments \
     --cookies-from-browser $BROWSER \
-    --print after_move:filepath \
+    --print-to-file after_move:filepath $temp_file \
     -o "%(title)s.%(ext)s" \
     $ARGS \
-    $TARGET |
-    awk '!seen[$0]++'
+    $TARGET >&2
+
+    awk '!seen[$0]++' $temp_file
 }
 
 http.ytdlp_audio() {
@@ -45,11 +46,12 @@ http.ytdlp_audio() {
     --extract-audio \
     --audio-format opus \
     --cookies-from-browser $BROWSER \
-    --print after_move:filepath \
+    --print-to-file after_move:filepath $temp_file \
     -o "%(title)s.%(ext)s" \
     $ARGS \
-    $TARGET |
-    awk '!seen[$0]++'
+    $TARGET >&2
+
+    awk '!seen[$0]++' $temp_file
 }
 
 http.images_flat() {
@@ -61,7 +63,7 @@ http.images_flat() {
 http.images() {
   set -o local_options
   local dest=$1:t first= line= second=false
-  
+
   log_stderr gallery-dl -D $dest $ARGS $TARGET | {
     while read -r line; do
       [[ -n $line ]] || continue
@@ -76,7 +78,7 @@ http.images() {
     mv $first $fdest && echo $fdest
     local files=($dest/*(ND))
     (( $#files == 0 )) && rm -r $dest || warn "Preserved $dest due to files remaining"
-  fi 
+  fi
 }
 
 # Example of fallback to image download if no video present i.e. reddit posts
@@ -91,13 +93,13 @@ http.git() {
   sep="(-/|)(tree|blob)"
 
   # https://github.com/Squirreljetpack/fzs/tree/main/src ->
-  # https://github.com/Squirreljetpack/fzs, Squirreljetpack/fzs, github.com 
+  # https://github.com/Squirreljetpack/fzs, Squirreljetpack/fzs, github.com
   base=${${1%%/$~sep/*}#*://}
   root=${${base#*://}:h1}
   user_repo=${base#*/}
   [[ $user_repo == */* ]] || return
 
-  # main/src, (/-)/tree/, 
+  # main/src, (/-)/tree/,
   rest=${1#*/$~sep/}
   sep=${${1%$rest}#$base}
 
