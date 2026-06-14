@@ -444,7 +444,21 @@ warn() {
 
 info() {
   ((VERBOSE)) || return
+  if [[ -n $1 ]]; then
   print -u2 -- "${fg[blue]}[INFO: $1]${reset_color} $2"
+  else
+  print -u2 -- "${fg[blue]}[INFO]${reset_color} $2"
+  fi
+  [[ -n $TARGET ]] && _log_msg "[INFO: $1] $2"
+}
+
+info0() {
+  ((VERBOSE)) || return
+  if [[ -n $1 ]]; then
+  print -u2 -- "${fg[green]}[INFO: $1]${reset_color} $2"
+  else
+  print -u2 -- "${fg[green]}[INFO]${reset_color} $2"
+  fi
   [[ -n $TARGET ]] && _log_msg "[INFO: $1] $2"
 }
 
@@ -947,34 +961,34 @@ __output() {
 
 __input() {
   if (($RETRY_FROM)); then
-    __lg_get_since_failed $RETRY_FROM
+    __lg_get_since_failed $RETRY_FROM | tr '\n' '\0'
     # todo: reprocess
     return
   fi
 
   {
-    # we enforce that inputs (targets) do not contain newlines, maybe there should eb a warn?
+    # important that inputs (targets) do not contain newlines
     if (($#INPUTS)); then
-      print -rl -- $INPUTS
+      print -rN -- $INPUTS
     else
       if [ -t 0 ]; then
         out="$(${=PASTEcmd})" # buffer
         [[ -n $out ]] || out="$(${=PASTEcmd})"
-        echo $out
+        printf "%s\0" "${(f)out}"
       elif $ZSHDL_ITER_ARGS; then
-        print -rl -- $@
+        print -rN -- $@
       else
-        cat
+        tr '\n' '\0'
       fi
     fi
   } | __lg_filter_skipped
 }
 
 __read_queue_state() {
-  [[ -e $ZSHDL_QUEUE_FILE.state ]] || return 1
+  [[ -s $ZSHDL_QUEUE_FILE.state ]] || return 1
   last_number="$(tail -n 1 -- $ZSHDL_QUEUE_FILE.state)"
   if [[ $last_number == [0-9]## ]]; then
-    : > $ZSHDL_QUEUE_FILE.state
+    return 0
   else
     err QueueError "Invalid queue state encountered"
     return 1
@@ -1017,11 +1031,11 @@ __lg_filter_skipped() {
   if $ZSHDL_SKIP; then
     lines="$(sqlite3 "$ZSHDL_DB" "SELECT DISTINCT target FROM \"$ZSHDL_VARIANT\" WHERE LS = 0")"
     lines=(${(@f)lines})
-    while IFS= read -r line; do
+    while IFS= read -rd '' line; do
       if ((${lines[(ie)$line]})); then
         TARGET=$line _log_skipped
       else
-        echo $line
+        printf "%s\0" "$line"
       fi
     done
   else
@@ -1296,6 +1310,24 @@ __check_config() {
   # err "InvalidConfig" "Errors found in $offenders[*]."
 }
 
+__edit_queue() {
+  [[ -e $ZSHDL_QUEUE_FILE ]] || touch $ZSHDL_QUEUE_FILE
+  local backup="$(mktemp)"
+  cp $ZSHDL_QUEUE_FILE $backup
+
+  ${EDITOR:-vi} $ZSHDL_QUEUE_FILE
+
+  local file_changed=false
+  if ! cmp -s "$backup" "$ZSHDL_QUEUE_FILE"; then
+    file_changed=true
+  fi
+  if $file_changed; then
+    info0 "" "Queue file successfully updated"
+  fi
+
+  rm "$backup"
+}
+
 __edit_config() {
   local i file files
   while true; do
@@ -1504,11 +1536,14 @@ Options:
                         'n:' to display the last n logs
                         '.s' to filter by status
   --from [log_id=0] : Retry failed downloads.
+                        (Sets the queue position).
   -s                : Skip inputs which succeded in the past.
   -v                : Increment verbosity.
                         (At default verbosity, log entries with
                         codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
+                        This flag as well as -q modify the following flags behavior to apply to the queue:
+                        -e, -l, --from (set pos), --clear.
   -q                : Use the default queue file
   -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
@@ -1653,33 +1688,33 @@ set -- "${new_args[@]}"
 
 
 while getopts "hlevsq-" opt; do
-    case "$opt" in
-        e)
-            MODE=EDIT
-            ;;
-        s)
-            ZSHDL_SKIP=true
-            ;;
-        q)
-            ZSHDL_USE_QUEUE=true
-            have ex || fatal_err "ex is required for -q"
-            ;;
-        v)
-            ((VERBOSE+=1))
-            ;;
-        h)
-            SHOWHELP=true
-            ;;
-        l)
-            MODE=LOGS
-            ;;
-        '-'|:)
-            break
-            ;;
-        *)
-            usage 1
-            ;;
-    esac
+  case "$opt" in
+    e)
+      MODE=EDIT
+      ;;
+    s)
+      ZSHDL_SKIP=true
+      ;;
+    q)
+      ZSHDL_USE_QUEUE=true
+      have ex || fatal_err "ex is required for -q"
+      ;;
+    v)
+      ((VERBOSE+=1))
+      ;;
+    h)
+      SHOWHELP=true
+      ;;
+    l)
+      MODE=LOGS
+      ;;
+    '-'|:)
+      break
+      ;;
+    *)
+      usage 1
+      ;;
+  esac
 done
 
 shift $((OPTIND - 1))
@@ -1689,8 +1724,21 @@ $SHOWHELP && usage 0
 ### BEGIN
 __read_config $CONFIG
 
+if [[ $ZSHDL_USE_QUEUE == true && $RETRY_FROM -gt 0 ]]; then
+  if ! __read_queue_state; then
+    fatal_err "Cannot set queue position: Queue state is invalid or missing."
+  fi
+  echo $RETRY_FROM > $ZSHDL_QUEUE_FILE.state
+  info "Queue" "State updated to $RETRY_FROM"
+  exit 0
+fi
+
 if $CLEAR_LOGS; then
-  __clear_logs $@
+  if $ZSHDL_USE_QUEUE; then
+    rm -f $ZSHDL_QUEUE_FILE $ZSHDL_QUEUE_FILE.state && echo "Queue cleared."
+  else
+    __clear_logs $@
+  fi
   exit
 fi
 
@@ -1699,16 +1747,41 @@ $ZSHDL_ITER_ARGS || export ARGS_ALL="${(j. .)${(@qq)@}}"
 
 case $MODE in
   LOGS)
-    __parse_log_args $@
-    if (($#LOG_ARGS)); then
-      __show_log_entries $LOG_ARGS
+    if $ZSHDL_USE_QUEUE; then
+      if [[ -e $ZSHDL_QUEUE_FILE ]]; then
+        print "${fg[yellow]}Queue:${reset_color} $ZSHDL_QUEUE_FILE"
+        local current=1
+        local target_line=1
+        __read_queue_state && target_line=$last_number
+
+        while IFS= read -r line; do
+          if (( current == target_line )); then
+            print "\033[90m── ▼ next up ────────────────────────${reset_color}"
+          fi
+
+          print -r -- "   $line"
+          ((current++))
+        done < $ZSHDL_QUEUE_FILE
+        (( current == target_line )) && print "\033[90m── ▼ next up ────────────────────────${reset_color}"
+      else
+        info "" "Queue is empty."
+      fi
     else
-      __show_log
+      __parse_log_args $@
+      if (($#LOG_ARGS)); then
+        __show_log_entries $LOG_ARGS
+      else
+        __show_log
+      fi
     fi
     exit
     ;;
   EDIT)
-    __edit_config $CONFIG
+    if $ZSHDL_USE_QUEUE; then
+      __edit_queue
+    else
+      __edit_config $CONFIG
+    fi
     exit
     ;;
 esac
@@ -1781,7 +1854,7 @@ $ZSHDL_STRIPWHITESPACE && whitespace=
 
 if ! $ZSHDL_USE_QUEUE; then
   __input $@ | {
-    while IFS=$whitespace read -r line; do
+    while IFS=$whitespace read -rd '' line; do
       [[ -n $line ]] || continue
       (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
       { handle $line </dev/tty | __output; } &
@@ -1789,34 +1862,44 @@ if ! $ZSHDL_USE_QUEUE; then
     done
   }
 else
-  { __input $@ && echo; } >> $ZSHDL_QUEUE_FILE
+  __input $@ | while IFS= read -rd '' line; do
+    if [[ $line == *$'\n'* ]]; then
+      warn Queue "Item contains newline: $line"
+    fi
+    print -r -- $line >> $ZSHDL_QUEUE_FILE
+  done
+
   if __read_queue_state; then
     CURRENT_QUEUE_LINE=$((last_number % ZSHDL_MAX_QUEUE_HISTORY_SIZE))
     TRIM=$(( last_number - CURRENT_QUEUE_LINE ))
     if ((TRIM)); then
       tmp="$(mktemp)" &&
-      tail -n +$(( TRIM + 1 )) $ZSHDL_QUEUE_FILE > $tmp &&
+      { repeat $TRIM read -r; cat; } < $ZSHDL_QUEUE_FILE > $tmp &&
       mv $tmp $ZSHDL_QUEUE_FILE || fatal_err "Error trimming queue"
     fi
   else
     CURRENT_QUEUE_LINE=1
   fi
 
-  tail -n +$CURRENT_QUEUE_LINE -- $ZSHDL_QUEUE_FILE | while IFS= read -r line; do
-    # skip comments
-    if [[ $line == ${line#"# "} ]]; then
-      [[ -n $line ]] || continue
-      (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
-      { handle $line </dev/tty | __output; } &
-      tasks+=($!)
-    else
-      ((VERBOSE > 2)) && print -u2 -- $line
-    fi
+  { repeat $((CURRENT_QUEUE_LINE - 1)) read -r; cat; } < $ZSHDL_QUEUE_FILE | {
+    exec 3<&0
+    while IFS=$whitespace read -u 3 -r line; do
+      # skip comments
+      if [[ $line == ${line#"# "} ]]; then
+        [[ -n $line ]] || continue
+        (( $#tasks >= $ZSHDL_THREADS )) && __wait_any
+        { handle $line </dev/tty | __output; } &
+        tasks+=($!)
+      else
+        ((VERBOSE > 2)) && print -u2 -- $line
+      fi
 
-    {
-      echo $((++CURRENT_QUEUE_LINE))
-    } > $ZSHDL_QUEUE_FILE.state
-  done
+      {
+        echo $((++CURRENT_QUEUE_LINE))
+      } > $ZSHDL_QUEUE_FILE.state
+    done
+    exec 3<&-
+  }
 fi
 
 exec {pp}>&-

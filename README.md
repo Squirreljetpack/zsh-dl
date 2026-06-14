@@ -48,8 +48,6 @@ https://github.com/user-attachments/assets/55a36923-0bad-48fe-bc76-a382834af399
 
 - Reads urls as input directly from your clipboard
 
-- Uses [lt](https://github.com/Squirreljetpack/lt) if installed for hassle-free destination determination
-
 ### ⚙ Simple Configuration
 
 - Declare handlers and postprocessors for various input types:
@@ -157,7 +155,6 @@ The installer will prompt you for what to name the executable as. The default is
 
 zsh-dl relies on the following external command-line tools. Certain functionality will be disabled without them:
 
-- [lt](https://github.com/Squirreljetpack/lt): For determining download destination.
 - [sqlite3](https://www.sqlite.org/download.html): For logging.
 - clipboard commands (xclip/pbcopy[^7]): For reading from clipboard.
 
