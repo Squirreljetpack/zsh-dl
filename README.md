@@ -207,7 +207,8 @@ Options:
   -q                : Use the default queue file
   -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
-  --clear [glob]    : Clear logs.
+  --clear […globs]  : Clear logs matching all given globs.
+                       Within a glob, '|' can be used as an OR operator.
   …method_args      : Passed to the ARGS array of methods.
                         ':' applies the arguments to the next stage's method.
 

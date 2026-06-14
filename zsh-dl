@@ -1018,16 +1018,43 @@ __lg_filter_skipped() {
   fi
 }
 
-# todo: clear logs matching input glob
 __clear_logs() {
   if [[ ! -f $ZSHDL_DB ]]; then
     internal_err show_log_entries "Database not found: $ZSHDL_DB"
     return 1
   fi
-  printf "This will clear all logs. Are you sure? [y/n]: "
-  read -r ans
-  [[ $ans == [Yy]* ]] && rm -f $ZSHDL_DB &&
-  echo "Logs deleted." || return 1
+
+  if (($#)); then
+    local query="DELETE FROM \"$ZSHDL_VARIANT\" WHERE "
+    local first=true
+    local glob sub
+    for glob in "$@"; do
+      $first || query+=" AND "
+      query+="("
+      local sub_first=true
+      local sub_globs=(${(s.|.)glob})
+      for sub in "$sub_globs[@]"; do
+        $sub_first || query+=" OR "
+        query+="(input GLOB '$sub' OR target GLOB '$sub')"
+        sub_first=false
+      done
+      query+=")"
+      first=false
+    done
+    local deleted=$(
+      sqlite3 "$ZSHDL_DB" "$query; SELECT changes();"
+    )
+    echo "Deleted $deleted matching log(s) from $ZSHDL_VARIANT."
+  else
+    printf "This will clear all logs. Are you sure? [y/n]: "
+    read -r ans
+    if [[ $ans == [Yy]* ]]; then
+      rm -f $ZSHDL_DB
+      echo "Logs deleted."
+    else
+      return 1
+    fi
+  fi
 }
 
 __begin_lg() {
@@ -1474,7 +1501,8 @@ Options:
   -q                : Use the default queue file
   -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
-  --clear [glob]    : Clear logs.
+  --clear […globs]  : Clear logs matching all given globs.
+                       Within a glob, '|' can be used as an OR operator.
   …method_args      : Passed to the ARGS array of methods.
                         ':' applies the arguments to the next stage's method.
 
@@ -1650,7 +1678,10 @@ $SHOWHELP && usage 0
 ### BEGIN
 __read_config $CONFIG
 
-$CLEAR_LOGS && __clear_logs $@
+if $CLEAR_LOGS; then
+  __clear_logs $@
+  exit
+fi
 
 $ZSHDL_ITER_ARGS || export ARGS_ALL="${(j. .)${(@qq)@}}"
 
