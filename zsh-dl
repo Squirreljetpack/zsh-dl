@@ -1046,7 +1046,7 @@ __clear_logs() {
     )
     echo "Deleted $deleted matching log(s) from $ZSHDL_VARIANT."
   else
-    printf "This will clear all logs. Are you sure? [y/n]: "
+    printf "This will clear all logs from ALL databases. Are you sure? [y/n]: "
     read -r ans
     if [[ $ans == [Yy]* ]]; then
       rm -f $ZSHDL_DB

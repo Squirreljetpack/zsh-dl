@@ -1,3 +1,11 @@
+## [0.4.0] - 2026-06-14
+
+### 🚀 Features
+
+- Yt-dlp progress bars
+- Various fixes and improvements
+- Changed status codes
+
 ## [0.3.3] - 2025-11-23
 
 ### 🚀 Features
