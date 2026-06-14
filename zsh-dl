@@ -587,6 +587,15 @@ _get_LS_color() {
   esac
 }
 
+_display_LS() {
+  local ls=$1
+  local width=${2:-2}
+  local symbol=$ls
+  [[ "$ls" == "-1" ]] && symbol="-"
+  local color="$(_get_LS_color "$ls")"
+  printf "%s%${width}s%s" "$color" "$symbol" "${reset_color}"
+}
+
 __parse_log_args() {
   typeset -ga LOG_ARGS
   LOG_FILTER=
@@ -691,8 +700,9 @@ __show_log_entries() {
   while IFS=$'\x1E' read -r -d $'\x1F' log_id log_time log_target log_msg log_dest log_dir log_ls; do
     $first_entry && print && first_entry=false
     local header_pre="Task $log_id:   status code "
-    local header_text="$header_pre$(_get_LS_color $log_ls)$log_ls${reset_color}"
-    local header_text_nocolor="$header_pre$log_ls"
+    local header_text="$header_pre$(_display_LS $log_ls)"
+    local symbol=$log_ls; [[ "$log_ls" == "-1" ]] && symbol="-"
+    local header_text_nocolor="$header_pre$(printf "%2s" "$symbol")"
     local width=${#header_text_nocolor}
 
     local line=""
@@ -775,6 +785,7 @@ __show_log() {
     max[1]=2
     max[2]=6
     max[3]=7
+    max[4]=2
   }
   {
     for(i=1; i<=NF; i++) { gsub(/\x1b\[[0-9;]*m/, "", $i) }
@@ -782,9 +793,10 @@ __show_log() {
     if (length($1) > max[1]) max[1] = length($1)
     if (length($3) > max[2]) max[2] = length($3)
     if (length($4) > max[3]) max[3] = length($4)
+    if (length($6) > max[4]) max[4] = length($6)
   }
   END {
-    printf "%d %d %d %d %d\n", max[1], 14, max[2], max[3], 2
+    printf "%d %d %d %d %d\n", max[1], 14, max[2], max[3], max[4]
   }' <<< "$data"))
 
   # Calculate space available for flexible columns
@@ -837,7 +849,6 @@ __show_log() {
   print "$sep_border"
 
   while IFS=$'\t' read -r id time target msg dest ls; do
-    local color="$(_get_LS_color "$ls")"
     local id_str="$(__center_text "$id" "${col_widths[1]}")"
     local time_str="$(__truncate_right "$time" "${col_widths[2]}")"
     local target_str="$(__truncate_right "$target" "${col_widths[3]}")"
@@ -846,14 +857,14 @@ __show_log() {
     else
       local content_str="$(__truncate_left "$dest" "${col_widths[4]}")"
     fi
-    local ls_str="$(__center_text "$ls" "${col_widths[5]}")"
+    local ls_display="$(_display_LS "$ls" "${col_widths[5]}")"
 
-    printf "│ %s │ %s │ %s │ %s │ %s%s%s │\n" \
+    printf "│ %s │ %s │ %s │ %s │ %s │\n" \
       "$id_str" \
       "$time_str" \
       "$target_str" \
       "$content_str" \
-      "$color" "$ls_str" "${reset_color}"
+      "$ls_display"
   done <<< "$data"
 
   print "$bot_border"
