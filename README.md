@@ -195,12 +195,16 @@ Options:
   -l […log_ids]     : Show the log for the given log_ids.
                         'n:' to display the last n logs
                         '.s' to filter by status
-  --from [log_id=0] : Retry failed downloads.
+  -r [log_id]       : Retry downloads from log_id.
+                        Compatible with -s.
+                        Defaults to the last id with a target.
   -s                : Skip inputs which succeded in the past.
   -v                : Increment verbosity.
                         (At default verbosity, log entries with
                         codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
+                        This flag (and -q)modifies the following flags' behaviors to apply to the queue:
+                        -e, -l, --from (set queue position), --clear.
   -q                : Use the default queue file
   -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.

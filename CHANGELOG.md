@@ -1,3 +1,11 @@
+## [0.5.0] - 2026-07-20
+
+### 🚀 Features
+
+- Display completed as '-' instead of '-1'
+- Queue newline safety + clear, list
+- Rename `--from` to `-r` with `-s` compatibility
+
 ## [0.4.0] - 2026-06-14
 
 ### 🚀 Features

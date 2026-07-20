@@ -960,9 +960,8 @@ __output() {
 }
 
 __input() {
-  if (($RETRY_FROM)); then
-    __lg_get_since_failed $RETRY_FROM | tr '\n' '\0'
-    # todo: reprocess
+  if [[ $RETRY_FROM =~ ^[0-9]+$ ]]; then
+    __lg_get_since_id $RETRY_FROM $ZSHDL_SKIP | tr '\n' '\0'
     return
   fi
 
@@ -1017,11 +1016,20 @@ __lg_get_since() {
   sqlite3 "$ZSHDL_DB" "$query"
 }
 
-__lg_get_since_failed() {
-  local query="
-    SELECT DISTINCT target FROM \"$ZSHDL_VARIANT\"
-    WHERE id > $1 AND LS > 0;
-  "
+__lg_get_since_id() {
+  local id=${1:-0}
+  local failed=${2:-false}
+  local conds=("target IS NOT NULL AND target != ''")
+
+  [[ $failed == true ]] && conds+=("LS > 0")
+
+  local query
+  if (( id == 0 )); then
+    query="SELECT target FROM \"$ZSHDL_VARIANT\" WHERE ${(j: AND :)conds} ORDER BY id DESC LIMIT 1;"
+  else
+    conds+=("id >= $id")
+    query="SELECT DISTINCT target FROM \"$ZSHDL_VARIANT\" WHERE ${(j: AND :)conds};"
+  fi
 
   sqlite3 "$ZSHDL_DB" "$query"
 }
@@ -1535,15 +1543,16 @@ Options:
   -l […log_ids]     : Show the log for the given log_ids.
                         'n:' to display the last n logs
                         '.s' to filter by status
-  --from [log_id=0] : Retry failed downloads.
-                        (Sets the queue position).
+  -r [log_id]       : Retry downloads from log_id.
+                        Compatible with -s.
+                        Defaults to the last id with a target.
   -s                : Skip inputs which succeded in the past.
   -v                : Increment verbosity.
                         (At default verbosity, log entries with
                         codes < -2 are omitted).
   --queue [file]    : Append input to and read from the queue file.
-                        This flag as well as -q modify the following flags behavior to apply to the queue:
-                        -e, -l, --from (set pos), --clear.
+                        This flag (and -q)modifies the following flags' behaviors to apply to the queue:
+                        -e, -l, --from (set queue position), --clear.
   -q                : Use the default queue file
   -d [directory]    : Run in <directory>
   --verbose [level] : Set verbosity level.
@@ -1583,14 +1592,13 @@ Status codes:
  > 0: Handling error
 EOF
 
-  # '
   (($#)) && exit $1
 }
 
 
 SHOWHELP=false
 CLEAR_LOGS=false
-RETRY_FROM=0
+RETRY_FROM=false
 RETRY=1
 SCRIPT="$(readlink -f -- "$0")"
 PROG="$(basename "$0")"
@@ -1615,13 +1623,13 @@ while (($#)); do
     --help)
       SHOWHELP=true
       ;;
-    --from)
+    -r)
       if ! $_posargs; then
         if [[ "$2" =~ ^[0-9]+$ ]]; then
           RETRY_FROM=$2
           shift
         else
-          RETRY_FROM=1
+          RETRY_FROM=0
         fi
         shift
         continue
@@ -1724,12 +1732,13 @@ $SHOWHELP && usage 0
 ### BEGIN
 __read_config $CONFIG
 
-if [[ $ZSHDL_USE_QUEUE == true && $RETRY_FROM -gt 0 ]]; then
+if [[ $ZSHDL_USE_QUEUE == true && $RETRY_FROM =~ ^[0-9]+$ ]]; then
   if ! __read_queue_state; then
     fatal_err "Cannot set queue position: Queue state is invalid or missing."
   fi
-  echo $RETRY_FROM > $ZSHDL_QUEUE_FILE.state
-  info "Queue" "State updated to $RETRY_FROM"
+  local queue_pos=$(( RETRY_FROM > 0 ? RETRY_FROM : 1 ))
+  echo $queue_pos > $ZSHDL_QUEUE_FILE.state
+  info "Queue" "State updated to $queue_pos"
   exit 0
 fi
 

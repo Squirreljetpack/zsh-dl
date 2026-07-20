@@ -29,7 +29,8 @@ http.ytdlp() {
     --abort-on-unavailable-fragments \
     --cookies-from-browser $BROWSER \
     --print-to-file after_move:filepath $temp_file \
-    -o "%(title)s.%(ext)s" \
+    # -o "%(title)s.%(ext)s" \
+    -o "%(playlist_title&{}|.)s/%(title)s.%(ext)s" \
     $ARGS \
     $TARGET >&2
 
@@ -48,7 +49,7 @@ http.ytdlp_audio() {
     --audio-format opus \
     --cookies-from-browser $BROWSER \
     --print-to-file after_move:filepath $temp_file \
-    -o "%(title)s.%(ext)s" \
+    -o "%(playlist_title&{}|.)s/%(title)s.%(ext)s" \
     $ARGS \
     $TARGET >&2
 
