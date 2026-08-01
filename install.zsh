@@ -27,7 +27,13 @@ else
 fi
 
 for f in config/*; do
-	$cmd $f $ZSHDL_CONFIG_DIR/ >/dev/null || :
+  target="$ZSHDL_CONFIG_DIR/${f##*/}"
+  
+  if cmp -s "$f" "$target"; then
+    continue
+  fi
+
+  $cmd "$f" "$ZSHDL_CONFIG_DIR/" >/dev/null || :
 done
 
 print -n -- "What name should zsh-dl be installed to?: (dl)"
