@@ -275,7 +275,7 @@ ssh.default() {
   if ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT $1 "[ -d ${(@qq)2} ]"; then
     slash='/'
   fi
-  success_or_log rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:${(@qq)2}$slash $dest || return # -u does an update in case we decided to keep the target
+  log_stderr_on_fail rsync -e "ssh -o ConnectTimeout=$ZSHDL_CONNECT_TIMEOUT" -avucz --partial $1:${(@qq)2}$slash $dest >&2 || return # -u does an update in case we decided to keep the target
   [[ -e $dest ]] && echo $dest
 }
 
@@ -538,6 +538,23 @@ log_stderr() {
     LS=$code _log_msg "[ERROR: ${(j. .)@}] $err_msg"
   else
     LS=$code _log_msg "[INFO: ${(j. .)@}] $err_msg"
+  fi
+  return $code
+}
+
+log_stderr_on_fail() {
+  : args: command_to_run args_to_cmd
+  : outputs: run command, let stdout/stderr through, and duplicate stderr to logging only on failure
+  :
+  err_tf="$(mktemp)"
+  dbgvar err_tf
+  trap 'rm $err_tf' EXIT
+  $@ 2> >(tee $err_tf >&2)
+  code=$?
+  err_msg="$(< $err_tf)"
+  [[ -n $err_msg ]] || return
+  if ((code)); then
+    LS=$code _log_msg "[ERROR: ${(j. .)@}] $err_msg"
   fi
   return $code
 }

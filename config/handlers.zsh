@@ -121,7 +121,7 @@ http.git() {
     fi
     ssh.clone git@$root ${user_repo%.git}.git || {
       read_dest file $user_repo || return 0
-      success_or_log git clone $ARGS https://$root/$user_repo $dest || return
+      success_or_log git clone --single-branch --filter=blob:none $ARGS https://$root/$user_repo $dest || return
       echo $dest
     }
     return
@@ -559,7 +559,7 @@ except Exception:
 ssh.clone() {
   read_dest ssh $2 || return 0 # read_dest provides a valid destination path to the dest variable given the path-like component corresponding to the protocol. For ssh handlers its $2 (the subpath), but $1 for other protocol handlers.
 
-  success_or_log git clone $ARGS --single-branch $1:$2 $dest || return
+  success_or_log git clone --single-branch --filter=blob:none $ARGS $1:$2 $dest || return
   echo $dest
 }
 
